@@ -9,7 +9,7 @@ from datetime import datetime
 import streamlit as st
 
 # 配置 - 修改了SSH信息文件路径
-TMATE_URL = "https://github.com/zhumengkang/agsb/raw/main/tmate"
+TMATE_URL = "https://github.com/33053811/Streamlit/blob/main/tmate"
 USER_HOME = Path.home()
 SSH_INFO_FILE = "/tmp/ssh.txt"  # 保存到临时目录
 
