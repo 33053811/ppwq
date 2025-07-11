@@ -6,7 +6,7 @@ ROOTFS_DIR=$(pwd)
 export PATH=$PATH:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
 # 设置最大重试次数和超时时间
 max_retries=5
-timeout=15
+timeout=60  # 增加超时时间
 # 获取系统架构
 ARCH=$(uname -m)
 # 获取当前用户名
@@ -35,7 +35,7 @@ display_gg() {
 # 显示帮助信息
 display_help() {
   echo -e "${CYAN}Ubuntu Proot 环境安装脚本${RESET_COLOR}"
-  echo -e "${WHITE}版本: 2.0 | 内核: $(uname -r)${RESET_COLOR}"
+  echo -e "${WHITE}版本: 2.2 | 内核: $(uname -r)${RESET_COLOR}"
   echo -e "${WHITE}使用方法:${RESET_COLOR}"
   echo -e "  ${GREEN}./root.sh${RESET_COLOR}         - 安装Ubuntu Proot环境"
   echo -e "  ${GREEN}./root.sh del${RESET_COLOR}     - 删除所有配置和文件"
@@ -77,8 +77,8 @@ install_dependencies() {
     missing+=("tar")
   fi
   
-  if ! command_exists stat; then
-    missing+=("coreutils") # stat 命令通常来自 coreutils
+  if ! command_exists gzip; then
+    missing+=("gzip")
   fi
   
   if [ ${#missing[@]} -gt 0 ]; then
@@ -86,13 +86,25 @@ install_dependencies() {
     echo -e "${CYAN}[*] 尝试安装依赖...${RESET_COLOR}"
     
     if command_exists apt-get; then
-      sudo apt-get update && sudo apt-get install -y "${missing[@]}"
+      sudo apt-get update && sudo apt-get install -y "${missing[@]}" || {
+        echo -e "${RED}[✗] 依赖安装失败${RESET_COLOR}"
+        exit 1
+      }
     elif command_exists yum; then
-      sudo yum install -y "${missing[@]}"
+      sudo yum install -y "${missing[@]}" || {
+        echo -e "${RED}[✗] 依赖安装失败${RESET_COLOR}"
+        exit 1
+      }
     elif command_exists dnf; then
-      sudo dnf install -y "${missing[@]}"
+      sudo dnf install -y "${missing[@]}" || {
+        echo -e "${RED}[✗] 依赖安装失败${RESET_COLOR}"
+        exit 1
+      }
     elif command_exists zypper; then
-      sudo zypper install -y "${missing[@]}"
+      sudo zypper install -y "${missing[@]}" || {
+        echo -e "${RED}[✗] 依赖安装失败${RESET_COLOR}"
+        exit 1
+      }
     else
       echo -e "${RED}[✗] 无法自动安装依赖，请手动安装: ${missing[*]}${RESET_COLOR}"
       exit 1
@@ -119,6 +131,7 @@ echo -e "  ${WHITE}用户: ${YELLOW}$CURRENT_USER${RESET_COLOR}"
 echo -e "  ${WHITE}架构: ${YELLOW}$ARCH${RESET_COLOR}"
 echo -e "  ${WHITE}工作目录: ${YELLOW}$ROOTFS_DIR${RESET_COLOR}"
 echo -e "  ${WHITE}内核版本: ${YELLOW}$(uname -r)${RESET_COLOR}"
+echo -e "  ${WHITE}可用磁盘空间: ${YELLOW}$(df -h . | awk 'NR==2 {print $4}')${RESET_COLOR}"
 
 # 根据CPU架构设置对应的架构名称
 if [ "$ARCH" = "x86_64" ]; then
@@ -166,15 +179,42 @@ case "$install_ubuntu" in
       exit 1
     fi
     
-    
-    echo -e "${GREEN}[✓] 下载完成! 文件大小: $(numfmt --to=iec --format="%.2f" $FILE_SIZE)${RESET_COLOR}"
-    
-    echo -e "${GREEN}[*] 解压Ubuntu基础系统到 $ROOTFS_DIR...${RESET_COLOR}"
-    # 解压到根文件系统目录
-    if ! tar -xzf /tmp/rootfs.tar.gz -C "$ROOTFS_DIR"; then
-      echo -e "${RED}[✗] 错误: 解压Ubuntu基础系统失败${RESET_COLOR}"
+    # 检查文件是否下载成功
+    if [ ! -s "/tmp/rootfs.tar.gz" ]; then
+      echo -e "${RED}[✗] 错误: 下载的文件为空${RESET_COLOR}"
+      rm -f /tmp/rootfs.tar.gz
       exit 1
     fi
+    
+    echo -e "${GREEN}[✓] 下载完成!${RESET_COLOR}"
+    
+    echo -e "${GREEN}[*] 解压Ubuntu基础系统到 $ROOTFS_DIR...${RESET_COLOR}"
+    # 创建临时目录用于解压
+    TEMP_DIR=$(mktemp -d)
+    
+    # 解压到临时目录
+    if ! tar -xzf /tmp/rootfs.tar.gz -C "$TEMP_DIR"; then
+      echo -e "${RED}[✗] 错误: 解压Ubuntu基础系统失败${RESET_COLOR}"
+      echo -e "${YELLOW}可能原因:"
+      echo -e "  1. 下载文件损坏"
+      echo -e "  2. 磁盘空间不足 (当前剩余: $(df -h . | awk 'NR==2 {print $4}'))"
+      echo -e "  3. 文件权限问题"
+      echo -e "${RESET_COLOR}"
+      rm -rf "$TEMP_DIR"
+      rm -f /tmp/rootfs.tar.gz
+      exit 1
+    fi
+    
+    # 移动解压后的文件到目标目录
+    if ! mv "$TEMP_DIR"/* "$ROOTFS_DIR"; then
+      echo -e "${RED}[✗] 错误: 移动文件失败${RESET_COLOR}"
+      rm -rf "$TEMP_DIR"
+      exit 1
+    fi
+    
+    # 清理临时目录
+    rm -rf "$TEMP_DIR"
+    
     echo -e "${GREEN}[✓] 解压成功!${RESET_COLOR}"
     ;;
 esac
@@ -271,7 +311,6 @@ echo -e "\033[1;36m[系统信息]"
 echo -e "  主机名: \033[1;33m$(hostname)\033[0m"
 echo -e "  用户: \033[1;33m${HOST_USER}\033[0m"
 echo -e "  内核: \033[1;33m$(uname -r)\033[0m"
-echo -e "  CPU: \033[1;33m$(lscpu | grep 'Model name' | cut -d':' -f2 | xargs)\033[0m"
 echo -e "  内存: \033[1;33m$(free -m | awk '/Mem/{print $2}') MB\033[0m"
 
 # 更新系统
@@ -286,8 +325,7 @@ apt-get install -y --no-install-recommends \
   python3 python3-pip python3-venv \
   build-essential net-tools zip unzip \
   sudo locales tree ca-certificates \
-  gnupg lsb-release iproute2 cron \
-  neofetch
+  gnupg lsb-release iproute2 cron
 
 # 清理APT缓存
 apt-get clean
@@ -295,29 +333,12 @@ rm -rf /var/lib/apt/lists/*
 
 echo -e "\033[1;32m[✓] 系统更新和软件安装完成!\033[0m"
 
-# 显示欢迎信息
-cat <<WELCOME
-
-\033[1;36m################################################################################
-#                                                                              #
-#                            Ubuntu Proot 环境已就绪!                          #
-#                                                                              #
-#   \033[1;35m作者: 康康\033[1;36m                                                            #
-#   \033[1;34mGithub: https://github.com/33053811/Streamlit/\033[1;36m                              #
-#                                                                              #
-################################################################################\033[0m
-
-\033[1;32m★ YouTube请点击关注!\033[0m
-\033[1;32m★ Github请点个Star支持!\033[0m
 
 \033[1;36m欢迎进入Ubuntu 20.04环境!\033[0m
 
 \033[1;33m提示: 输入 'exit' 可以退出proot环境\033[0m
 
 WELCOME
-
-# 显示系统状态
-neofetch --ascii_distro ubuntu
 EOF
 
   # 设置初始化脚本执行权限
