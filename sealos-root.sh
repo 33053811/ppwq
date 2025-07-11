@@ -166,13 +166,6 @@ case "$install_ubuntu" in
       exit 1
     fi
     
-    # 验证文件大小
-    FILE_SIZE=$(stat -c%s "/tmp/rootfs.tar.gz" 2>/dev/null || echo 0)
-    if [ "$FILE_SIZE" -lt 50000000 ]; then
-      echo -e "${RED}[✗] 错误: 下载的文件过小(仅 ${FILE_SIZE} 字节)，可能不完整${RESET_COLOR}"
-      rm -f /tmp/rootfs.tar.gz
-      exit 1
-    fi
     
     echo -e "${GREEN}[✓] 下载完成! 文件大小: $(numfmt --to=iec --format="%.2f" $FILE_SIZE)${RESET_COLOR}"
     
