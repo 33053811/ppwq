@@ -5,15 +5,12 @@ ROOTFS_DIR=$(pwd)
 # 添加路径
 export PATH=$PATH:~/.local/usr/bin
 # 设置最大重试次数和超时时间
-MAX_RETRIES=10
-TIMEOUT=5
+max_retries=50
+timeout=1
 # 获取系统架构
 ARCH=$(uname -m)
 # 获取当前用户名
 CURRENT_USER=$(whoami)
-# Ubuntu 版本
-UBUNTU_VERSION="22.04"
-UBUNTU_CODENAME="jammy"
 
 # 定义颜色
 CYAN='\e[0;36m'
@@ -21,299 +18,252 @@ WHITE='\e[0;37m'
 RED='\e[0;31m'
 GREEN='\e[0;32m'
 YELLOW='\e[0;33m'
-BLUE='\e[0;34m'
-MAGENTA='\e[0;35m'
 RESET_COLOR='\e[0m'
-
-# 显示带时间戳的消息
-log() {
-    local color=$1
-    local message=$2
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-    echo -e "${color}[${timestamp}] ${message}${RESET_COLOR}"
-}
 
 # 显示安装完成信息
 display_gg() {
-    echo -e "\n${WHITE}══════════════════════════════════════════════════════════════${RESET_COLOR}"
-    echo -e "                  ${CYAN}🚀 UBUNTU PROOT 安装完成! 🚀${RESET_COLOR}"
-    echo -e "${WHITE}══════════════════════════════════════════════════════════════${RESET_COLOR}"
-    echo -e "${GREEN}▸ 启动命令: ${WHITE}./start-proot.sh${RESET_COLOR}"
-    echo -e "${GREEN}▸ 退出环境: ${WHITE}在proot中执行 'exit'${RESET_COLOR}"
-    echo -e "${GREEN}▸ 删除环境: ${WHITE}./root.sh del${RESET_COLOR}"
-    echo -e "${GREEN}▸ 帮助信息: ${WHITE}./root.sh help${RESET_COLOR}"
-    echo -e "${WHITE}══════════════════════════════════════════════════════════════${RESET_COLOR}\n"
+  echo -e "${WHITE}___________________________________________________${RESET_COLOR}"
+  echo -e ""
+  echo -e "           ${CYAN}-----> 任务完成! <----${RESET_COLOR}"
 }
 
 # 显示帮助信息
 display_help() {
-    echo -e "${CYAN}╔════════════════════════ Ubuntu Proot 环境安装脚本 ═══════════════════════╗${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}${GREEN} 功能:${RESET_COLOR} 在非root环境下安装完整的Ubuntu系统                               ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════╣${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}${WHITE} 使用方法:${RESET_COLOR}                                                              ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}  ${GREEN}./root.sh${RESET_COLOR}         - 安装Ubuntu Proot环境                              ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}  ${GREEN}./root.sh del${RESET_COLOR}     - 删除所有配置和文件                                ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}  ${GREEN}./root.sh help${RESET_COLOR}    - 显示此帮助信息                                   ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════╣${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}${YELLOW} 系统要求:${RESET_COLOR}                                                              ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR} - 支持架构: x86_64, aarch64                                ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR} - 磁盘空间: 至少1GB可用空间                                ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR} - 网络连接: 需要访问互联网                                ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════╝${RESET_COLOR}"
-    echo -e "${WHITE}更多信息请查看 README.md 文件${RESET_COLOR}\n"
-}
-
-# 检查命令是否存在
-command_exists() {
-    command -v "$@" >/dev/null 2>&1
-}
-
-# 安全下载函数
-safe_download() {
-    local url=$1
-    local output=$2
-    local retries=0
-    
-    while [ $retries -lt $MAX_RETRIES ]; do
-        if curl --retry 3 --connect-timeout $TIMEOUT -sSL -o "$output" "$url"; then
-            if [ -s "$output" ]; then
-                log $GREEN "下载成功: $(basename $output)"
-                return 0
-            fi
-        fi
-        
-        retries=$((retries+1))
-        log $YELLOW "下载失败 (尝试 $retries/$MAX_RETRIES): $(basename $output)"
-        sleep 2
-    done
-    
-    log $RED "无法下载文件: $(basename $output)"
-    return 1
+  echo -e "${CYAN}Ubuntu Proot 环境安装脚本${RESET_COLOR}"
+  echo -e "${WHITE}使用方法:${RESET_COLOR}"
+  echo -e "  ${GREEN}./root.sh${RESET_COLOR}         - 安装Ubuntu Proot环境"
+  echo -e "  ${GREEN}./root.sh del${RESET_COLOR}     - 删除所有配置和文件"
+  echo -e "  ${GREEN}./root.sh help${RESET_COLOR}    - 显示此帮助信息"
+  echo -e ""
+  echo -e "${WHITE}更多信息请查看 README.md 文件${RESET_COLOR}"
 }
 
 # 删除所有配置和文件
 delete_all() {
-    echo -e "\n${RED}════════════════════ 警告: 将删除所有配置和文件 ════════════════════${RESET_COLOR}"
-    read -p "确定要删除Ubuntu Proot环境? (y/N): " confirm
-    
-    if [[ $confirm =~ ^[Yy]$ ]]; then
-        log $YELLOW "正在删除Ubuntu Proot环境..."
-        
-        # 删除proot目录下的所有文件，但保留root.sh和README.md
-        find "$ROOTFS_DIR" -mindepth 1 -not -name "root.sh" -not -name "README.md" -not -name ".git" -not -path "*/.git/*" -exec rm -rf {} \; 2>/dev/null
-        
-        log $GREEN "所有配置和文件已删除!"
-        echo -e "${WHITE}如果需要重新安装，请运行:${RESET_COLOR} ${GREEN}./root.sh${RESET_COLOR}\n"
-    else
-        log $YELLOW "取消删除操作"
-    fi
-    exit 0
+  echo -e "${YELLOW}正在删除所有配置和文件...${RESET_COLOR}"
+  
+  # 删除proot目录下的所有文件，但保留root.sh和README.md
+  find "$ROOTFS_DIR" -mindepth 1 -not -name "root.sh" -not -name "README.md" -not -name ".git" -not -path "*/.git/*" -exec rm -rf {} \; 2>/dev/null
+  
+  echo -e "${GREEN}所有配置和文件已删除!${RESET_COLOR}"
+  echo -e "${WHITE}如果需要重新安装，请运行:${RESET_COLOR} ${GREEN}./root.sh${RESET_COLOR}"
+  exit 0
 }
 
-# 安装Ubuntu基础系统
-install_ubuntu() {
-    log $BLUE "开始安装Ubuntu ${UBUNTU_VERSION} 基础系统..."
+# 处理命令行参数
+if [ "$1" = "del" ]; then
+  delete_all
+elif [ "$1" = "help" ]; then
+  display_help
+  exit 0
+fi
+
+echo "当前用户: $CURRENT_USER"
+echo "系统架构: $ARCH"
+echo "工作目录: $ROOTFS_DIR"
+
+# 根据CPU架构设置对应的架构名称
+if [ "$ARCH" = "x86_64" ]; then
+  ARCH_ALT=amd64
+elif [ "$ARCH" = "aarch64" ]; then
+  ARCH_ALT=arm64
+else
+  printf "不支持的CPU架构: ${ARCH}"
+  exit 1
+fi
+
+echo "架构别名: $ARCH_ALT"
+
+# 检查是否已安装
+if [ ! -e $ROOTFS_DIR/.installed ]; then
+  echo "#######################################################################################"
+  echo "#"
+  echo "#                                      Foxytoux 安装程序"
+  echo "#"
+  echo "#                           Copyright (C) 2024, RecodeStudios.Cloud"
+  echo "#"
+  echo "#"
+  echo "#######################################################################################"
+
+  read -p "是否安装Ubuntu? (YES/no): " install_ubuntu
+fi
+
+# 根据用户输入决定是否安装Ubuntu
+case $install_ubuntu in
+  [yY][eE][sS])
+    echo "开始下载Ubuntu基础系统..."
+    # 使用官方Ubuntu源下载基础系统
+    UBUNTU_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/ubuntu-base-20.04.4-base-${ARCH_ALT}.tar.gz"
     
-    # 根据CPU架构设置对应的架构名称
-    case "$ARCH" in
-        x86_64) ARCH_ALT=amd64 ;;
-        aarch64) ARCH_ALT=arm64 ;;
-        armv7l) ARCH_ALT=armhf ;;
-        *) 
-            log $RED "不支持的CPU架构: $ARCH"
-            exit 1
-            ;;
-    esac
-    
-    # Ubuntu基础镜像URL
-    local UBUNTU_URL="https://partner-images.canonical.com/core/${UBUNTU_CODENAME}/current/ubuntu-${UBUNTU_CODENAME}-core-cloudimg-${ARCH_ALT}-root.tar.gz"
-    
-    # 下载Ubuntu基础系统
-    if ! safe_download "$UBUNTU_URL" "/tmp/rootfs.tar.gz"; then
-        exit 1
+    # 下载文件并验证完整性
+    if ! curl --retry $max_retries --connect-timeout $timeout -o /tmp/rootfs.tar.gz "$UBUNTU_URL"; then
+      echo -e "${RED}错误: Ubuntu基础系统下载失败${RESET_COLOR}"
+      exit 1
     fi
     
-    log $BLUE "解压Ubuntu基础系统到 $ROOTFS_DIR..."
-    tar -xzpf /tmp/rootfs.tar.gz -C $ROOTFS_DIR
-    rm -f /tmp/rootfs.tar.gz
-}
+    # 验证文件大小（最小100MB）
+    if [ $(stat -c%s "/tmp/rootfs.tar.gz") -lt 100000000 ]; then
+      echo -e "${RED}错误: 下载的Ubuntu基础系统文件过小，可能不完整${RESET_COLOR}"
+      rm -f /tmp/rootfs.tar.gz
+      exit 1
+    fi
+    
+    echo "解压Ubuntu基础系统到 $ROOTFS_DIR..."
+    # 解压到根文件系统目录
+    tar -xf /tmp/rootfs.tar.gz -C $ROOTFS_DIR
+    ;;
+  *)
+    echo "跳过Ubuntu安装。"
+    ;;
+esac
 
 # 安装proot
-install_proot() {
-    log $BLUE "安装PROOT环境..."
-    mkdir -p $ROOTFS_DIR/usr/local/bin
-    
-    # PROOT下载URL
-    local PROOT_URL="https://raw.githubusercontent.com/zhumengkang/agsb/main/proot-${ARCH}"
-    
-    log $CYAN "下载PROOT..."
-    if ! safe_download "$PROOT_URL" "$ROOTFS_DIR/usr/local/bin/proot"; then
-        exit 1
-    fi
-    
-    chmod 755 $ROOTFS_DIR/usr/local/bin/proot
-}
+if [ ! -e $ROOTFS_DIR/.installed ]; then
+  echo "创建目录: $ROOTFS_DIR/usr/local/bin"
+  # 创建目录
+  mkdir $ROOTFS_DIR/usr/local/bin -p
+  
+  echo "下载proot..."
+  # 使用官方proot构建
+  PROOT_VERSION="5.3.0"
+  PROOT_URL="https://github.com/proot-me/proot/releases/download/v${PROOT_VERSION}/proot-v${PROOT_VERSION}-${ARCH}-static"
+  
+  # 下载proot
+  if ! curl -L --retry $max_retries --connect-timeout $timeout -o $ROOTFS_DIR/usr/local/bin/proot "$PROOT_URL"; then
+    echo -e "${RED}错误: proot下载失败${RESET_COLOR}"
+    exit 1
+  fi
+
+  # 验证proot文件
+  if [ ! -s "$ROOTFS_DIR/usr/local/bin/proot" ]; then
+    echo -e "${RED}错误: proot文件为空或无效${RESET_COLOR}"
+    rm -f $ROOTFS_DIR/usr/local/bin/proot
+    exit 1
+  fi
+
+  echo "设置proot执行权限"
+  # 设置proot执行权限
+  chmod 755 $ROOTFS_DIR/usr/local/bin/proot
+fi
 
 # 完成安装配置
-setup_environment() {
-    log $BLUE "配置系统环境..."
-    
-    # 设置DNS服务器
-    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8" > ${ROOTFS_DIR}/etc/resolv.conf
-    
-    # 创建用户目录
-    mkdir -p $ROOTFS_DIR/home/$CURRENT_USER
-    
-    # 创建安装标记文件
-    touch $ROOTFS_DIR/.installed
-}
+if [ ! -e $ROOTFS_DIR/.installed ]; then
+  echo "配置DNS服务器..."
+  # 设置DNS服务器
+  printf "nameserver 1.1.1.1\nnameserver 1.0.0.1" > ${ROOTFS_DIR}/etc/resolv.conf
+  
+  echo "清理临时文件..."
+  # 清理临时文件
+  rm -rf /tmp/rootfs.tar.gz /tmp/sbin
+  
+  echo "创建安装标记文件..."
+  # 创建安装标记文件
+  touch $ROOTFS_DIR/.installed
+fi
 
-# 创建初始化脚本
-create_init_script() {
-    log $BLUE "创建初始化脚本..."
-    
-    cat > $ROOTFS_DIR/root/init.sh << EOF
+echo "创建用户目录: $ROOTFS_DIR/home/$CURRENT_USER"
+# 创建用户目录
+mkdir -p $ROOTFS_DIR/home/$CURRENT_USER
+
+echo "创建.bashrc文件..."
+# 创建正常的.bashrc文件
+cat > $ROOTFS_DIR/root/.bashrc << EOF
+# 默认.bashrc内容
+if [ -f /etc/bash.bashrc ]; then
+  . /etc/bash.bashrc
+fi
+
+# 显示提示信息
+PS1='\[\033[1;32m\]proot-ubuntu\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\\$ '
+EOF
+
+echo "创建初始化脚本..."
+# 创建初始化脚本 - 使用与基础系统一致的20.04(focal)源
+cat > $ROOTFS_DIR/root/init.sh << EOF
 #!/bin/bash
 
 # 使用传入的物理机用户名
 HOST_USER="$CURRENT_USER"
 
-# 设置终端
-echo "export TERM=xterm-256color" >> /root/.bashrc
-echo "export PS1='\[\033[1;32m\]proot-ubuntu\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\\\\$ '" >> /root/.bashrc
-
 # 创建物理机用户目录
 mkdir -p /home/\$HOST_USER 2>/dev/null
 echo -e "\033[1;32m已创建用户目录: /home/\$HOST_USER\033[0m"
 
-# 更新系统
-echo -e "\033[1;33m正在更新系统...\033[0m"
-apt-get update -qq
-apt-get upgrade -y -qq
+# 备份原始软件源
+cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null
 
-# 安装基本软件包
-echo -e "\033[1;33m正在安装基本软件包...\033[0m"
-apt-get install -y -qq --no-install-recommends \\
-    curl wget git vim nano htop \\
-    tmux python3 python3-pip \\
-    build-essential net-tools \\
-    zip unzip sudo locales \\
-    tree ca-certificates \\
-    gnupg lsb-release \\
-    iproute2 cron \\
-    neofetch
+# 设置正确的软件源 (Ubuntu 20.04 focal)
+tee /etc/apt/sources.list <<SOURCES
+deb http://archive.ubuntu.com/ubuntu focal main universe restricted multiverse
+deb http://archive.ubuntu.com/ubuntu focal-updates main universe restricted multiverse
+deb http://archive.ubuntu.com/ubuntu focal-backports main universe restricted multiverse
+deb http://security.ubuntu.com/ubuntu focal-security main universe restricted multiverse
+SOURCES
 
-# 清理缓存
-apt-get autoremove -y -qq
-apt-get clean -qq
-rm -rf /var/lib/apt/lists/*
+# 显示提示信息
+echo -e "\033[1;32m软件源已更新为Ubuntu 20.04 (Focal)源\033[0m"
+echo -e "\033[1;33m正在更新系统并安装必要软件包，请稍候...\033[0m"
 
-# 设置语言环境
-locale-gen en_US.UTF-8
-update-locale LANG=en_US.UTF-8
+# 更新系统并安装软件包
+apt -y update && apt -y upgrade && apt install -y curl wget git vim nano htop tmux python3 python3-pip nodejs npm build-essential net-tools zip unzip sudo locales tree ca-certificates gnupg lsb-release iproute2 cron
+
+echo -e "\033[1;32m系统更新和软件安装完成!\033[0m"
 
 # 显示欢迎信息
-clear
-neofetch
-echo -e "\033[1;36m════════════════════════ Ubuntu Proot 环境 ════════════════════════\033[0m"
-echo -e "\033[1;35m系统信息:\033[0m"
-echo -e "  ▸ \033[1;34m用户名:\033[0m \033[0;33mroot\033[0m"
-echo -e "  ▸ \033[1;34m主机用户:\033[0m \033[0;33m\$HOST_USER\033[0m"
-echo -e "  ▸ \033[1;34mUbuntu版本:\033[0m \033[0;33m$UBUNTU_VERSION ($UBUNTU_CODENAME)\033[0m"
-echo -e "  ▸ \033[1;34m架构:\033[0m \033[0;33m$ARCH\033[0m"
-echo -e "\033[1;35m常用命令:\033[0m"
-echo -e "  ▸ \033[1;32m更新系统:\033[0m apt update && apt upgrade"
-echo -e "  ▸ \033[1;32m安装软件:\033[0m apt install <软件包>"
-echo -e "  ▸ \033[1;32m退出环境:\033[0m exit"
-echo -e "\033[1;36m══════════════════════════════════════════════════════════════════\033[0m"
-echo -e "\033[1;33m提示: 输入 'exit' 可以退出proot环境\033[0m\n"
+printf "\n\033[1;36m################################################################################\033[0m\n"
+printf "\033[1;33m#                                                                              #\033[0m\n"
+printf "\033[1;33m#   \033[1;35m作者: 平平无奇\033[1;33m                                                            #\033[0m\n"
+printf "\033[1;33m#   \033[1;34mGithub: https://github.com/33053811/Streamlit\033[1;33m                              #\033[0m\n"
+printf "\033[1;33m#   \033[1;31mYouTube: https://www.youtube.com/@康康的V2Ray与Clash\033[1;33m                  #\033[0m\n"
+printf "\033[1;33m#   \033[1;36mTelegram: https://t.me/+WibQp7Mww1k5MmZl\033[1;33m                           #\033[0m\n"
+printf "\033[1;33m#                                                                              #\033[0m\n"
+printf "\033[1;33m################################################################################\033[0m\n"
+printf "\033[1;32m\n★ YouTube请点击关注!\033[0m\n"
+printf "\033[1;32m★ Github请点个Star支持!\033[0m\n\n"
+printf "\033[1;36m欢迎进入Ubuntu 20.04环境!\033[0m\n\n"
+printf "\033[1;33m提示: 输入 'exit' 可以退出proot环境\033[0m\n\n"
 EOF
 
-    chmod +x $ROOTFS_DIR/root/init.sh
-}
+echo "设置初始化脚本执行权限..."
+# 设置初始化脚本执行权限
+chmod +x $ROOTFS_DIR/root/init.sh
 
-# 创建启动脚本
-create_start_script() {
-    log $BLUE "创建启动脚本..."
-    
-    cat > $ROOTFS_DIR/start-proot.sh << EOF
+echo "创建启动脚本..."
+# 创建启动脚本 - 使用绝对路径避免潜在问题
+cat > $ROOTFS_DIR/start-proot.sh << EOF
 #!/bin/bash
-# Ubuntu Proot 启动脚本
-echo -e "${CYAN}正在启动Ubuntu ${UBUNTU_VERSION} Proot环境...${RESET_COLOR}"
-cd $ROOTFS_DIR
-$ROOTFS_DIR/usr/local/bin/proot \\
-  --rootfs="$ROOTFS_DIR" \\
-  --cwd=/root \\
-  --bind=/dev \\
-  --bind=/sys \\
-  --bind=/proc \\
-  --bind=/etc/resolv.conf \\
-  --bind=/tmp \\
-  --bind=$HOME:/host-home \\
+# 启动proot环境
+echo "正在启动proot环境..."
+cd "$ROOTFS_DIR"
+"$ROOTFS_DIR/usr/local/bin/proot" \\
+  --rootfs="." \\
+  -0 -w "/root" -b /dev -b /sys -b /proc -b /etc/resolv.conf --kill-on-exit \\
   /bin/bash -c "cd /root && /bin/bash /root/init.sh && /bin/bash"
 EOF
 
-    chmod +x $ROOTFS_DIR/start-proot.sh
-}
+chmod +x $ROOTFS_DIR/start-proot.sh
 
-# 主安装流程
-main_install() {
-    clear
-    echo -e "${CYAN}╔════════════════════ Ubuntu Proot 安装程序 ═══════════════════╗${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}${GREEN} 版本: 2.0.0${RESET_COLOR}                                                  ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}${GREEN} 作者: 康康${RESET_COLOR}                                                      ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}║${RESET_COLOR}${GREEN} GitHub: https://github.com/zhumengkang/${RESET_COLOR}              ${CYAN}║${RESET_COLOR}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET_COLOR}"
-    
-    # 显示系统信息
-    echo -e "${WHITE}▸ 当前用户: ${GREEN}$CURRENT_USER${RESET_COLOR}"
-    echo -e "${WHITE}▸ 系统架构: ${GREEN}$ARCH${RESET_COLOR}"
-    echo -e "${WHITE}▸ Ubuntu版本: ${GREEN}$UBUNTU_VERSION ($UBUNTU_CODENAME)${RESET_COLOR}"
-    echo -e "${WHITE}▸ 工作目录: ${GREEN}$ROOTFS_DIR${RESET_COLOR}"
-    echo -e "${WHITE}══════════════════════════════════════════════════════════════${RESET_COLOR}"
-    
-    # 检查是否已安装
-    if [ -e $ROOTFS_DIR/.installed ]; then
-        log $YELLOW "检测到已安装的环境，跳过安装步骤"
-        display_gg
-        exit 0
-    fi
-    
-    # 确认安装
-    read -p "是否继续安装Ubuntu Proot环境? (Y/n): " confirm_install
-    [[ "$confirm_install" =~ ^[Nn]$ ]] && exit 0
-    
-    # 安装步骤
-    install_ubuntu
-    install_proot
-    setup_environment
-    create_init_script
-    create_start_script
-    
-    # 完成安装
-    clear
-    display_gg
-    
-    # 询问是否立即启动
-    read -p "是否立即启动Ubuntu Proot环境? (Y/n): " start_now
-    if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
-        log $CYAN "启动Ubuntu Proot环境..."
-        $ROOTFS_DIR/start-proot.sh
-    else
-        log $GREEN "安装完成！您可以使用 ./start-proot.sh 命令随时启动环境"
-    fi
-}
+# 清屏并显示完成信息
+clear
+display_gg
+echo -e "\n${CYAN}Ubuntu proot环境已安装完成!${RESET_COLOR}"
+echo -e "${CYAN}使用以下命令启动proot环境:${RESET_COLOR}"
+echo -e "${WHITE}    ./start-proot.sh${RESET_COLOR}"
+echo -e "${CYAN}在proot环境中输入 'exit' 可以退出${RESET_COLOR}"
+echo -e "${CYAN}如需删除所有配置和文件，请执行:${RESET_COLOR}"
+echo -e "${WHITE}    ./root.sh del${RESET_COLOR}\n"
 
-# 处理命令行参数
-case "$1" in
-    del|delete)
-        delete_all
-        ;;
-    help|--help|-h)
-        display_help
-        exit 0
-        ;;
-    *)
-        main_install
-        ;;
-esac
+echo "是否立即启动proot环境? (y/n): "
+read start_now
+
+if [[ "$start_now" == "y" || "$start_now" == "Y" ]]; then
+  echo "正在启动proot环境..."
+  # 启动proot环境并执行初始化脚本
+  cd "$ROOTFS_DIR"
+  "$ROOTFS_DIR/usr/local/bin/proot" \
+    --rootfs="." \
+    -0 -w "/root" -b /dev -b /sys -b /proc -b /etc/resolv.conf --kill-on-exit \
+    /bin/bash -c "cd /root && /bin/bash /root/init.sh && /bin/bash"
+else
+  echo "您可以稍后使用 ./start-proot.sh 命令启动proot环境"
+fi
