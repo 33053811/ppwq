@@ -1,96 +1,101 @@
-#!/bin/bash
-# Ubuntu 20.04+ SSH与tmux配置一键脚本
-# 功能：自动安装OpenSSH和tmux，配置SSH服务，创建可远程访问的tmux会话
+import os
+import subprocess
+import getpass
+from datetime import datetime
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-NC='\033[0m' # No Color
+# 颜色输出（终端可用）
+class Color:
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[0;33m'
+    RED = '\033[0;31m'
+    NC = '\033[0m'  # 重置颜色
 
-# 日志函数
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
+def run_command(cmd, sudo=False, capture_output=False):
+    """执行系统命令"""
+    try:
+        if sudo:
+            cmd = ["sudo"] + cmd
+        if capture_output:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            return result
+        else:
+            subprocess.run(cmd, check=True)
+            return True
+    except subprocess.CalledProcessError as e:
+        print(f"{Color.RED}[ERROR] 命令执行失败: {' '.join(cmd)}{Color.NC}")
+        print(f"错误信息: {e.stderr}")
+        return False
+    except Exception as e:
+        print(f"{Color.RED}[ERROR] 执行命令时出错: {e}{Color.NC}")
+        return False
 
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+def main():
+    print(f"{Color.GREEN}===== Ubuntu 20.04+ SSH与tmux一键配置 =====")
+    print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{Color.NC}")
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+    # 1. 检查是否为root权限
+    if os.geteuid() != 0:
+        print(f"{Color.RED}[ERROR] 请用root权限运行（例如：sudo python3 脚本名.py）{Color.NC}")
+        return
 
-# 检查是否为root用户
-if [ "$(id -u)" -ne 0 ]; then
-    log_error "请使用root权限运行此脚本（例如：sudo ./setup_ssh_tmux.sh）"
-    exit 1
-fi
+    # 2. 更新系统包
+    print(f"\n{Color.GREEN}[1/5] 更新系统包列表...{Color.NC}")
+    if not run_command(["apt", "update", "-y"], sudo=True):
+        return
 
-# 更新系统
-log_info "正在更新系统包列表..."
-apt update -y
-if [ $? -ne 0 ]; then
-    log_error "系统更新失败"
-    exit 1
-fi
+    # 3. 安装OpenSSH服务器
+    print(f"\n{Color.GREEN}[2/5] 安装OpenSSH服务器...{Color.NC}")
+    if not run_command(["apt", "install", "openssh-server", "-y"], sudo=True):
+        return
 
-# 安装OpenSSH服务器
-log_info "正在安装OpenSSH服务器..."
-apt install openssh-server -y
-if [ $? -ne 0 ]; then
-    log_error "OpenSSH安装失败"
-    exit 1
-fi
+    # 4. 配置SSH服务（允许密码登录）
+    print(f"\n{Color.GREEN}[3/5] 配置SSH服务...{Color.NC}")
+    ssh_config = "/etc/ssh/sshd_config"
+    # 修改配置（启用密码登录和root登录，适合临时环境）
+    run_command(["sed", "-i", "s/#PasswordAuthentication yes/PasswordAuthentication yes/g", ssh_config], sudo=True)
+    run_command(["sed", "-i", "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g", ssh_config], sudo=True)
+    # 重启SSH服务
+    if not run_command(["systemctl", "restart", "ssh"], sudo=True):
+        return
 
-# 配置SSH服务
-log_info "正在配置SSH服务..."
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config
-sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config
-systemctl restart ssh
-if [ $? -ne 0 ]; then
-    log_error "SSH服务重启失败"
-    exit 1
-fi
+    # 5. 安装tmux
+    print(f"\n{Color.GREEN}[4/5] 安装tmux...{Color.NC}")
+    if not run_command(["apt", "install", "tmux", "-y"], sudo=True):
+        return
 
-# 安装tmux
-log_info "正在安装tmux..."
-apt install tmux -y
-if [ $? -ne 0 ]; then
-    log_error "tmux安装失败"
-    exit 1
-fi
+    # 6. 创建tmux会话（用原登录用户，避免root权限）
+    print(f"\n{Color.GREEN}[5/5] 创建tmux会话...{Color.NC}")
+    original_user = os.environ.get("SUDO_USER", getpass.getuser())
+    # 用普通用户权限创建tmux会话（避免root会话）
+    if not run_command(["su", "-", original_user, "-c", "tmux new-session -d -s ssh_session"], sudo=True):
+        print(f"{Color.YELLOW}[警告] tmux会话可能已存在，忽略创建{Color.NC}")
 
-# 创建tmux会话
-log_info "正在创建tmux会话..."
-sudo -u $SUDO_USER tmux new-session -d -s ssh_session
-if [ $? -ne 0 ]; then
-    log_error "tmux会话创建失败"
-    exit 1
-fi
+    # 获取连接信息
+    # 获取公网IP（优先）
+    public_ip = subprocess.run(
+        ["curl", "-s", "ifconfig.me"],
+        stdout=subprocess.PIPE, text=True
+    ).stdout.strip()
+    # 公网IP获取失败则用内网IP
+    if not public_ip:
+        public_ip = subprocess.run(
+            ["hostname", "-I"],
+            stdout=subprocess.PIPE, text=True
+        ).stdout.split()[0]
 
-# 获取服务器IP地址
-log_info "正在获取服务器IP地址..."
-PUBLIC_IP=$(curl -s ifconfig.me)
-if [ -z "$PUBLIC_IP" ]; then
-    log_warning "无法获取公网IP，使用内网IP"
-    PUBLIC_IP=$(hostname -I | awk '{print $1}')
-fi
-
-# 获取当前用户名
-USERNAME=$SUDO_USER
-if [ -z "$USERNAME" ]; then
-    USERNAME=$(whoami)
-fi
-
-# 生成SSH信息文件
-SSH_INFO_FILE="/tmp/ssh.txt"
-cat > $SSH_INFO_FILE <<EOF
-Ubuntu 20.04+ SSH连接信息
+    # 生成SSH信息文件
+    ssh_info_file = "/tmp/ssh.txt"
+    with open(ssh_info_file, "w") as f:
+        f.write(f"""Ubuntu 20.04+ SSH连接信息
 =================================
 
 1. SSH连接命令:
-ssh $USERNAME@$PUBLIC_IP
+ssh {original_user}@{public_ip}
 
 2. 连接后附加到tmux会话:
 tmux attach-session -t ssh_session
@@ -102,19 +107,18 @@ tmux attach-session -t ssh_session
 在tmux中执行: exit
 
 系统信息:
-- 用户名: $USERNAME
-- 服务器IP: $PUBLIC_IP
+- 用户名: {original_user}
+- 服务器IP: {public_ip}
 - tmux会话名: ssh_session
+- 创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+""")
 
-EOF
+    # 显示结果
+    print(f"\n{Color.GREEN}===== 配置完成 ====={Color.NC}")
+    print(f"连接信息已保存到: {ssh_info_file}")
+    print("\n连接步骤:")
+    print(f"1. 本地终端执行: {Color.GREEN}ssh {original_user}@{public_ip}{Color.NC}")
+    print(f"2. 连接后执行: {Color.GREEN}tmux attach-session -t ssh_session{Color.NC}")
 
-# 显示连接信息
-echo
-echo -e "${GREEN}=================================${NC}"
-echo -e "${GREEN} SSH连接配置已完成!${NC}"
-echo -e "${GREEN}=================================${NC}"
-echo
-cat $SSH_INFO_FILE
-echo
-echo -e "${GREEN}连接信息已保存到: $SSH_INFO_FILE${NC}"
-echo -e "${GREEN}=================================${NC}"    
+if __name__ == "__main__":
+    main()
