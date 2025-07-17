@@ -1,4 +1,14 @@
 #!/bin/bash
+
+# 安装 cloudflared
+if ! command -v cloudflared >/dev/null 2>&1; then
+  echo "[+] Installing cloudflared..."
+  wget -O /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+  sudo dpkg -i /tmp/cloudflared.deb
+else
+  echo "[√] cloudflared already installed."
+fi
+
 set -e
 
 # 定义常量
