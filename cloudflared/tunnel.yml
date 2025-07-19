@@ -1,0 +1,7 @@
+tunnel: singbox-tunnel
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: singbox.ppwq.us.kg
+    service: http://localhost:12345
+  - service: http_status:404
