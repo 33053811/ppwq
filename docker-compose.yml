@@ -4,6 +4,14 @@ services:
     image: ghcr.io/sagernet/sing-box:latest
     container_name: sing-box
     restart: always
-    network_mode: host
     volumes:
       - ./config.json:/etc/sing-box/config.json
+    network_mode: host
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: always
+    command: tunnel --no-autoupdate run
+    volumes:
+      - ./cloudflared:/etc/cloudflared
