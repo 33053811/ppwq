@@ -884,4 +884,24 @@ systemctl stop wg-quick@wgcf >/dev/null 2>&1
 kill -15 $(pgrep warp-go) >/dev/null 2>&1 && sleep 2
 ipchange
 systemctl start wg-quick@wgcf >/dev/null 2>&1
-systemctl restart warp-go
+fi
+}
+
+# 添加缺失的函数定义
+sendip="engage.cloudflareclient.com"
+xendip="engage.cloudflareclient.com"
+
+# 主程序逻辑
+if [ "$1" = "list" ]; then
+    cip
+    # 显示节点信息的代码
+elif [ "$1" = "res" ]; then
+    killstart
+    echo "脚本已重启"
+elif [ "$1" = "del" ]; then
+    # 卸载脚本的代码
+    echo "脚本已卸载"
+else
+    cip
+    ins
+fi
