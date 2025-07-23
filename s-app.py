@@ -156,9 +156,12 @@ def write_debug_log(message):
             INSTALL_DIR.mkdir(parents=True, exist_ok=True)
         with open(DEBUG_LOG, 'a', encoding='utf-8') as f:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"[{timestamp}] {message}\n")  # 修复了此处的语法错误
+            f.write(f"[{timestamp}] {message}\n")  # 确保f-string正确闭合
+            f.flush()  # 立即写入文件
     except Exception as e:
         print(f"写入日志失败: {e}")
+        # 尝试直接打印错误信息
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 写入日志失败: {e}")
 
 # 下载二进制文件
 def download_binary(name, download_url, target_path):
@@ -241,7 +244,6 @@ def generate_links(domain, port_vm_ws, uuid_str):
     # === 直接使用域名和标准端口的节点 ===
     # TLS Direct
     direct_tls_config = {{
-        "ps": f"VMWS-TLS-{{hostname}}-Direct-
         "ps": f"VMWS-TLS-{{hostname}}-Direct-{{domain[:15]}}-443", 
         "add": domain, "port": "443", "id": uuid_str, "aid": "0",
         "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
@@ -273,11 +275,13 @@ def generate_links(domain, port_vm_ws, uuid_str):
 
 # 安装过程
 def install(uuid_str, port_vm_ws, argo_token, custom_domain):
+    write_debug_log("开始安装过程")
+    print(f"开始安装过程")
+    
     if not INSTALL_DIR.exists():
         INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     os.chdir(INSTALL_DIR)
-    write_debug_log("开始安装过程")
-
+    
     print(f"使用 UUID: ${uuid_str}")
     write_debug_log(f"UUID: ${uuid_str}")
 
