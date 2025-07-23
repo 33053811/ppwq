@@ -559,21 +559,25 @@ if __name__ == "__main__":
     print("===== 安装完成 =====")
             """
             
-            # 转义所有$符号，除了我们需要替换的变量
-            safe_template_str = script_template_str.replace('$', '$$')
-            # 恢复我们需要替换的变量的$符号
-            for var in ['uuid_str', 'port_vm_ws', 'argo_token', 'custom_domain']:
-                safe_template_str = safe_template_str.replace(f'$$${var}', f'${var}')
+            # 使用更安全的字符串替换方法
+            def safe_replace(template, replacements):
+                result = template
+                for key, value in replacements.items():
+                    placeholder = f'${key}'
+                    # 确保特殊字符被正确转义
+                    safe_value = value.replace('$', '$$').replace('"', '\\"')
+                    result = result.replace(placeholder, safe_value)
+                return result
             
-            # 创建安全的模板
-            script_template = Template(safe_template_str)
-            
-            # 使用safe_substitute进行替换
-            script_content = script_template.safe_substitute(
-                uuid_str=uuid_str,
-                port_vm_ws=port_vm_ws,
-                argo_token=argo_token if argo_token else 'None',
-                custom_domain=custom_domain if custom_domain else 'None'
+            # 替换变量
+            script_content = safe_replace(
+                script_template_str,
+                {
+                    'uuid_str': uuid_str,
+                    'port_vm_ws': str(port_vm_ws),
+                    'argo_token': argo_token if argo_token else 'None',
+                    'custom_domain': custom_domain if custom_domain else 'None'
+                }
             )
             
             f.write(script_content)
