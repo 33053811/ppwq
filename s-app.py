@@ -282,7 +282,7 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
     
     if not INSTALL_DIR.exists():
         INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-    os.chdir(INSTALL_DIR)
+    os.chdir(INSTALL_DIR)  # 使用Python的os.chdir()方法替代shell的cd命令
     
     print(f"使用 UUID: {uuid_str}")
     write_debug_log(f"UUID: {uuid_str}")
