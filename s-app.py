@@ -6,8 +6,8 @@ import time
 import re
 import json
 from pathlib import Path
-from string import Template  # 导入Template类
-import uuid  # 添加了uuid模块的导入
+from string import Template
+import uuid
 
 # 设置页面配置
 st.set_page_config(
@@ -67,7 +67,7 @@ DEBUG_LOG = INSTALL_DIR / "python_debug.log"
 if submit_button:
     # 检查必要参数
     if not uuid_str:
-        uuid_str = str(os.environ.get("uuid", str(uuid.uuid4())))  # 修正了uuid生成方式
+        uuid_str = str(os.environ.get("uuid", str(uuid.uuid4())))
     
     if not port_vm_ws:
         port_vm_ws = int(os.environ.get("vmpt", random.randint(10000, 65535)))
@@ -82,7 +82,7 @@ if submit_button:
         # 创建临时脚本文件
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             # 定义安装脚本模板
-            script_template = Template("""
+            script_template_str = """
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -277,22 +277,22 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
     os.chdir(INSTALL_DIR)
     write_debug_log("开始安装过程")
 
-    print(f"使用 UUID: {uuid_str}")
-    write_debug_log(f"UUID: {uuid_str}")
+    print(f"使用 UUID: ${uuid_str}")
+    write_debug_log(f"UUID: ${uuid_str}")
 
-    print(f"使用 Vmess 本地端口: {port_vm_ws}")
-    write_debug_log(f"Vmess Port: {port_vm_ws}")
+    print(f"使用 Vmess 本地端口: ${port_vm_ws}")
+    write_debug_log(f"Vmess Port: ${port_vm_ws}")
 
     if argo_token:
-        print(f"使用 Argo Tunnel Token: ******{argo_token[-6:]}")
+        print(f"使用 Argo Tunnel Token: ******${argo_token[-6:]}")
         write_debug_log(f"Argo Token: Present (not logged for security)")
     else:
         print("未提供 Argo Tunnel Token，将使用临时隧道 (Quick Tunnel)。")
         write_debug_log("Argo Token: Not provided, using Quick Tunnel.")
 
     if custom_domain:
-        print(f"使用自定义域名: {custom_domain}")
-        write_debug_log(f"Custom Domain (agn): {custom_domain}")
+        print(f"使用自定义域名: ${custom_domain}")
+        write_debug_log(f"Custom Domain (agn): ${custom_domain}")
     elif argo_token:
         print("\033[31m错误: 使用 Argo Tunnel Token 时必须提供自定义域名 (agn/--domain)。\033[0m")
         sys.exit(1)
@@ -310,9 +310,9 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
         elif "armv7" in machine: arch = "arm"
         else: arch = "amd64"
     else:
-        print(f"不支持的系统类型: {system}")
+        print(f"不支持的系统类型: ${system}")
         sys.exit(1)
-    write_debug_log(f"检测到系统: {system}, 架构: {machine}, 使用架构标识: {arch}")
+    write_debug_log(f"检测到系统: ${system}, 架构: ${machine}, 使用架构标识: ${arch}")
 
     # sing-box
     singbox_path = INSTALL_DIR / "sing-box"
@@ -321,21 +321,21 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
             print("获取sing-box最新版本号...")
             version_info = http_get("https://api.github.com/repos/SagerNet/sing-box/releases/latest")
             sb_version = json.loads(version_info)["tag_name"].lstrip("v") if version_info else "1.9.0-beta.11"
-            print(f"sing-box 最新版本: {sb_version}")
+            print(f"sing-box 最新版本: ${sb_version}")
         except Exception as e:
             sb_version = "1.9.0-beta.11"
-            print(f"获取最新版本失败，使用默认版本: {sb_version}，错误: {e}")
+            print(f"获取最新版本失败，使用默认版本: ${sb_version}，错误: ${e}")
         
-        sb_name = f"sing-box-{sb_version}-linux-{arch}"
-        if arch == "arm": sb_name_actual = f"sing-box-{sb_version}-linux-armv7"
+        sb_name = f"sing-box-${sb_version}-linux-${arch}"
+        if arch == "arm": sb_name_actual = f"sing-box-${sb_version}-linux-armv7"
         else: sb_name_actual = sb_name
 
-        sb_url = f"https://github.com/SagerNet/sing-box/releases/download/v{sb_version}/{sb_name_actual}.tar.gz"
+        sb_url = f"https://github.com/SagerNet/sing-box/releases/download/v${sb_version}/${sb_name_actual}.tar.gz"
         tar_path = INSTALL_DIR / "sing-box.tar.gz"
         
         if not download_file(sb_url, tar_path):
             print("sing-box 下载失败，尝试使用备用地址")
-            sb_url_backup = f"https://github.91chi.fun/https://github.com/SagerNet/sing-box/releases/download/v{sb_version}/{sb_name_actual}.tar.gz"
+            sb_url_backup = f"https://github.91chi.fun/https://github.com/SagerNet/sing-box/releases/download/v${sb_version}/${sb_name_actual}.tar.gz"
             if not download_file(sb_url_backup, tar_path):
                 print("sing-box 备用下载也失败，退出安装")
                 sys.exit(1)
@@ -347,14 +347,14 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
             
             extracted_folder_path = INSTALL_DIR / sb_name_actual 
             if not extracted_folder_path.exists():
-                 extracted_folder_path = INSTALL_DIR / f"sing-box-{sb_version}-linux-{arch}"
+                 extracted_folder_path = INSTALL_DIR / f"sing-box-${sb_version}-linux-${arch}"
 
             shutil.move(extracted_folder_path / "sing-box", singbox_path)
             shutil.rmtree(extracted_folder_path)
             tar_path.unlink()
             os.chmod(singbox_path, 0o755)
         except Exception as e:
-            print(f"解压或移动sing-box失败: {e}")
+            print(f"解压或移动sing-box失败: ${e}")
             if tar_path.exists(): tar_path.unlink()
             sys.exit(1)
 
@@ -364,10 +364,10 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
         cf_arch = arch
         if arch == "armv7": cf_arch = "arm"
         
-        cf_url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{cf_arch}"
+        cf_url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}"
         if not download_binary("cloudflared", cf_url, cloudflared_path):
             print("cloudflared 下载失败，尝试使用备用地址")
-            cf_url_backup = f"https://github.91chi.fun/https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{cf_arch}"
+            cf_url_backup = f"https://github.91chi.fun/https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}"
             if not download_binary("cloudflared", cf_url_backup, cloudflared_path):
                 print("cloudflared 备用下载也失败，退出安装")
                 sys.exit(1)
@@ -382,7 +382,7 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
     }}
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=2)
-    write_debug_log(f"生成配置文件: {CONFIG_FILE} with data: {config_data}")
+    write_debug_log(f"生成配置文件: ${CONFIG_FILE} with data: ${config_data}")
 
     create_sing_box_config(port_vm_ws, uuid_str)
     create_startup_script(argo_token, port_vm_ws, uuid_str)
@@ -411,8 +411,8 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
 
 # 创建sing-box配置
 def create_sing_box_config(port_vm_ws, uuid_str):
-    write_debug_log(f"创建sing-box配置，端口: {port_vm_ws}, UUID: {uuid_str}")
-    ws_path = f"/{uuid_str[:8]}-vm"
+    write_debug_log(f"创建sing-box配置，端口: ${port_vm_ws}, UUID: ${uuid_str}")
+    ws_path = f"/${uuid_str[:8]}-vm"
 
     config_dict = {{
         "log": {{"level": "info", "timestamp": True}},
@@ -431,7 +431,7 @@ def create_sing_box_config(port_vm_ws, uuid_str):
     sb_config_file = INSTALL_DIR / "sb.json"
     with open(sb_config_file, 'w') as f:
         json.dump(config_dict, f, indent=2)
-    write_debug_log(f"sing-box配置已写入文件: {sb_config_file}")
+    write_debug_log(f"sing-box配置已写入文件: ${sb_config_file}")
     return True
 
 # 创建启动脚本
@@ -439,9 +439,9 @@ def create_startup_script(argo_token, port_vm_ws, uuid_str):
     # sing-box启动脚本
     sb_start_script_path = INSTALL_DIR / "start_sb.sh"
     sb_start_content = f'''#!/bin/bash
-cd {INSTALL_DIR.resolve()}
+cd ${INSTALL_DIR.resolve()}
 ./sing-box run -c sb.json > sb.log 2>&1 &
-echo $! > {SB_PID_FILE.name}
+echo $! > ${SB_PID_FILE.name}
 '''
     sb_start_script_path.write_text(sb_start_content)
     os.chmod(sb_start_script_path, 0o755)
@@ -449,17 +449,17 @@ echo $! > {SB_PID_FILE.name}
     # cloudflared启动脚本
     cf_start_script_path = INSTALL_DIR / "start_cf.sh"
     cf_cmd_base = f"./cloudflared tunnel --no-autoupdate"
-    ws_path_for_url = f"/{uuid_str[:8]}-vm?ed=2048" 
+    ws_path_for_url = f"/${uuid_str[:8]}-vm?ed=2048" 
 
     if argo_token:
-        cf_cmd = f"{cf_cmd_base} run --token {argo_token}"
+        cf_cmd = f"${cf_cmd_base} run --token ${argo_token}"
     else:
-        cf_cmd = f"{cf_cmd_base} --url http://localhost:{port_vm_ws}{ws_path_for_url} --edge-ip-version auto --protocol http2"
+        cf_cmd = f"${cf_cmd_base} --url http://localhost:${port_vm_ws}${ws_path_for_url} --edge-ip-version auto --protocol http2"
     
     cf_start_content = f'''#!/bin/bash
-cd {INSTALL_DIR.resolve()}
-{cf_cmd} > {LOG_FILE.name} 2>&1 &
-echo $! > {ARGO_PID_FILE.name}
+cd ${INSTALL_DIR.resolve()}
+${cf_cmd} > ${LOG_FILE.name} 2>&1 &
+echo $! > ${ARGO_PID_FILE.name}
 '''
     cf_start_script_path.write_text(cf_start_content)
     os.chmod(cf_start_script_path, 0o755)
@@ -480,8 +480,8 @@ def setup_autostart():
             if str(script_name_sb) not in line and str(script_name_cf) not in line and line.strip()
         ]
         
-        filtered_lines.append(f"@reboot {script_name_sb} >/dev/null 2>&1")
-        filtered_lines.append(f"@reboot {script_name_cf} >/dev/null 2>&1")
+        filtered_lines.append(f"@reboot ${script_name_sb} >/dev/null 2>&1")
+        filtered_lines.append(f"@reboot ${script_name_cf} >/dev/null 2>&1")
         
         new_crontab = "\n".join(filtered_lines).strip() + "\n"
         
@@ -489,14 +489,14 @@ def setup_autostart():
             tmp_crontab_file.write(new_crontab)
             crontab_file_path = tmp_crontab_file.name
         
-        subprocess.run(f"crontab {crontab_file_path}", shell=True, check=True)
+        subprocess.run(f"crontab ${crontab_file_path}", shell=True, check=True)
         os.unlink(crontab_file_path)
             
         write_debug_log("已设置开机自启动")
         print("开机自启动设置成功。")
     except Exception as e:
-        write_debug_log(f"设置开机自启动失败: {e}")
-        print(f"设置开机自启动失败: {e}。但不影响正常使用。")
+        write_debug_log(f"设置开机自启动失败: ${e}")
+        print(f"设置开机自启动失败: ${e}。但不影响正常使用。")
 
 # 启动服务
 def start_services():
@@ -521,14 +521,14 @@ def get_tunnel_domain():
                 match = re.search(r'https://([a-zA-Z0-9.-]+\.trycloudflare\.com)', log_content)
                 if match:
                     domain = match.group(1)
-                    write_debug_log(f"从日志中提取到临时域名: {domain}")
-                    print(f"获取到临时域名: {domain}")
+                    write_debug_log(f"从日志中提取到临时域名: ${domain}")
+                    print(f"获取到临时域名: ${domain}")
                     return domain
             except Exception as e:
-                write_debug_log(f"读取或解析日志文件 {LOG_FILE} 出错: {e}")
+                write_debug_log(f"读取或解析日志文件 ${LOG_FILE} 出错: ${e}")
         
         retry_count += 1
-        print(f"等待tunnel域名生成... (尝试 {retry_count}/{max_retries}, 检查 {LOG_FILE})")
+        print(f"等待tunnel域名生成... (尝试 ${retry_count}/${max_retries}, 检查 ${LOG_FILE})")
         time.sleep(3)
     
     write_debug_log("获取tunnel域名超时。")
@@ -540,22 +540,31 @@ def main(uuid_str, port_vm_ws, argo_token, custom_domain):
 
 if __name__ == "__main__":
     # 直接调用安装函数，传入参数
-    all_links, link_names, domain = main('{uuid_str}', {port_vm_ws}, '{argo_token}', '{custom_domain}')
+    all_links, link_names, domain = main('${uuid_str}', ${port_vm_ws}, '${argo_token}', '${custom_domain}')
     # 输出结果，让Streamlit捕获
     print("===== 安装完成 =====")
-    print(f"域名: {domain}")
-    print(f"UUID: {uuid_str}")
-    print(f"端口: {port_vm_ws}")
+    print(f"域名: ${domain}")
+    print(f"UUID: ${uuid_str}")
+    print(f"端口: ${port_vm_ws}")
     print("节点链接:")
     for i, (link, name) in enumerate(zip(all_links, link_names)):
-        print(f"{i+1}. {name}:")
+        print(f"${i+1}. ${name}:")
         print(link)
         print("")
     print("===== 安装完成 =====")
-            """)
+            """
             
-            # 使用Template进行安全替换
-            script_content = script_template.substitute(
+            # 转义所有$符号，除了我们需要替换的变量
+            safe_template_str = script_template_str.replace('$', '$$')
+            # 恢复我们需要替换的变量的$符号
+            for var in ['uuid_str', 'port_vm_ws', 'argo_token', 'custom_domain']:
+                safe_template_str = safe_template_str.replace(f'$$${var}', f'${var}')
+            
+            # 创建安全的模板
+            script_template = Template(safe_template_str)
+            
+            # 使用safe_substitute进行替换
+            script_content = script_template.safe_substitute(
                 uuid_str=uuid_str,
                 port_vm_ws=port_vm_ws,
                 argo_token=argo_token if argo_token else 'None',
