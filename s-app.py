@@ -6,6 +6,7 @@ import time
 import re
 import json
 from pathlib import Path
+import uuid  # 添加了uuid模块的导入
 
 # 设置页面配置
 st.set_page_config(
@@ -65,7 +66,7 @@ DEBUG_LOG = INSTALL_DIR / "python_debug.log"
 if submit_button:
     # 检查必要参数
     if not uuid_str:
-        uuid_str = str(os.environ.get("uuid", str(os.uuid4())))
+        uuid_str = str(os.environ.get("uuid", str(uuid.uuid4())))  # 修正了uuid生成方式
     
     if not port_vm_ws:
         port_vm_ws = int(os.environ.get("vmpt", random.randint(10000, 65535)))
