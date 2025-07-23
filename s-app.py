@@ -81,9 +81,7 @@ if submit_button:
     with st.spinner("正在安装... 这可能需要1-2分钟，请耐心等待"):
         # 创建临时脚本文件
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            # 正确处理Python脚本中的路径
-            install_dir_str = str(INSTALL_DIR.resolve()).replace('"', '\\"')  # 转义双引号
-            
+            # 使用更安全的方法生成脚本内容
             script_content = f'''
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -108,7 +106,7 @@ import tempfile
 import argparse
 
 # 全局变量
-INSTALL_DIR = Path("{install_dir_str}")
+INSTALL_DIR = Path.home() / ".agsb"
 CONFIG_FILE = INSTALL_DIR / "config.json"
 SB_PID_FILE = INSTALL_DIR / "sbpid.log"
 ARGO_PID_FILE = INSTALL_DIR / "sbargopid.log"
@@ -282,7 +280,7 @@ def install(uuid_str, port_vm_ws, argo_token, custom_domain):
     
     if not INSTALL_DIR.exists():
         INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-    os.chdir(INSTALL_DIR)  # 使用Python的os.chdir()方法替代shell的cd命令
+    os.chdir(INSTALL_DIR)
     
     print(f"使用 UUID: {uuid_str}")
     write_debug_log(f"UUID: {uuid_str}")
@@ -446,7 +444,7 @@ def create_startup_script(argo_token, port_vm_ws, uuid_str):
     # sing-box启动脚本
     sb_start_script_path = INSTALL_DIR / "start_sb.sh"
     sb_start_content = f'''#!/bin/bash
-cd "{install_dir_str}"
+cd {INSTALL_DIR.resolve()}
 ./sing-box run -c sb.json > sb.log 2>&1 &
 echo $! > {SB_PID_FILE.name}
 '''
@@ -464,7 +462,7 @@ echo $! > {SB_PID_FILE.name}
         cf_cmd = f"{cf_cmd_base} --url http://localhost:{port_vm_ws}{ws_path_for_url} --edge-ip-version auto --protocol http2"
     
     cf_start_content = f'''#!/bin/bash
-cd "{install_dir_str}"
+cd {INSTALL_DIR.resolve()}
 {cf_cmd} > {LOG_FILE.name} 2>&1 &
 echo $! > {ARGO_PID_FILE.name}
 '''
