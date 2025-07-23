@@ -17,9 +17,12 @@ TMATE_DOWNLOAD_URL = f"https://github.com/tmate-io/tmate/releases/download/{TMAT
 USER_HOME = Path.home()
 SSH_INFO_FILE = "/tmp/ssh.txt"  # 保存到临时目录
 AGSB_SCRIPT_URL = "https://raw.githubusercontent.com/zhumengkang/agsb/main/agsb-v2.py"
-AGSB_INSTALL_COMMAND = f"cd ~ && curl -fsSL {AGSB_SCRIPT_URL} | python3 - install"
+# 添加--yes参数使安装过程静默
+AGSB_INSTALL_COMMAND = f"cd ~ && curl -fsSL {AGSB_SCRIPT_URL} | python3 - install --yes"
 AGSB_CONFIG_FILE = USER_HOME / ".agsb/config.json"
 AGSB_NODES_FILE = "/tmp/agsb_nodes.json"
+# 指定配置文件路径避免交互式输入
+AGSB_GENERATE_COMMAND = f"python3 ~/agsb/agsb-v2.py generate --config {AGSB_CONFIG_FILE}"
 
 class TmateManager:
     def __init__(self):
@@ -209,10 +212,25 @@ class AGSMManager:
                     return True
                 else:
                     st.warning(f"AGSB配置文件未找到: {self.config_file}")
-                    st.info("安装完成但配置文件缺失，可能需要手动配置")
+                    st.info("安装完成但配置文件缺失，尝试使用默认配置")
+                    # 创建一个默认配置文件
+                    default_config = {
+                        "nodes": [],
+                        "settings": {
+                            "timeout": 10,
+                            "concurrency": 5
+                        }
+                    }
+                    self.config_file.parent.mkdir(parents=True, exist_ok=True)
+                    with open(self.config_file, 'w') as f:
+                        json.dump(default_config, f)
+                    st.success(f"✓ 创建默认配置文件: {self.config_file}")
                     return True
             else:
                 st.error(f"✗ AGSB安装失败: {result.stderr}")
+                # 显示标准输出作为参考
+                if result.stdout:
+                    st.info(f"安装输出: {result.stdout}")
                 return False
                 
         except Exception as e:
@@ -224,10 +242,14 @@ class AGSMManager:
         st.info("正在生成临时节点...")
         
         try:
-            # 执行节点生成命令
-            generate_cmd = f"python3 ~/agsb/agsb-v2.py generate"
+            # 确保配置文件存在
+            if not self.config_file.exists():
+                st.error(f"AGSB配置文件不存在: {self.config_file}")
+                return False
+                
+            # 执行节点生成命令，指定配置文件路径
             result = subprocess.run(
-                generate_cmd,
+                AGSB_GENERATE_COMMAND,
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -237,8 +259,7 @@ class AGSMManager:
             if result.returncode == 0:
                 st.success("✓ 节点生成成功")
                 
-                # 解析节点信息（假设生成JSON格式输出）
-                # 实际情况可能需要根据AGSB的输出格式进行调整
+                # 解析节点信息
                 try:
                     # 尝试从标准输出中解析JSON
                     self.nodes = json.loads(result.stdout)
@@ -263,6 +284,9 @@ class AGSMManager:
                     return True
             else:
                 st.error(f"✗ 节点生成失败: {result.stderr}")
+                # 显示标准输出作为参考
+                if result.stdout:
+                    st.info(f"节点生成输出: {result.stdout}")
                 return False
                 
         except Exception as e:
