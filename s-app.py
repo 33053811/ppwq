@@ -81,8 +81,8 @@ if submit_button:
     with st.spinner("正在安装... 这可能需要1-2分钟，请耐心等待"):
         # 创建临时脚本文件
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            # 正确处理shell脚本中的变量替换
-            install_dir_str = str(INSTALL_DIR.resolve())
+            # 正确处理Python脚本中的路径
+            install_dir_str = str(INSTALL_DIR.resolve()).replace('"', '\\"')  # 转义双引号
             
             script_content = f'''
 #!/usr/bin/env python3
