@@ -1,0 +1,12 @@
+corp_id: "wwxxxxxxxxxxxx"
+secret: "会话存档secret"
+rsa_private_key: "/app/config/private.pem"
+pg_host: "db"
+pg_user: "wecom"
+pg_password: "wecom123"
+pg_database: "wecom_archive"
+fetch_interval: 60  # 秒
+
+# Web登录账号
+web_user: "admin"
+web_password: "123456"
