@@ -1,17 +1,39 @@
 version: '3'
 services:
-  sing-box:
-    image: ghcr.io/sagernet/sing-box:latest
-    container_name: sing-box
+  db:
+    image: postgres:14
+    container_name: wecom_db
     restart: always
+    environment:
+      POSTGRES_USER: wecom
+      POSTGRES_PASSWORD: wecom123
+      POSTGRES_DB: wecom_archive
     volumes:
-      - ./config.json:/etc/sing-box/config.json
-    network_mode: host
+      - ./data/db:/var/lib/postgresql/data
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared
+  archive:
+    image: python:3.11
+    container_name: wecom_archive
     restart: always
-    command: tunnel --no-autoupdate run
+    working_dir: /app
     volumes:
-      - ./cloudflared:/etc/cloudflared
+      - ./app:/app
+      - ./config:/app/config
+      - ./data:/app/data
+    command: bash -c "pip install -r requirements.txt && python fetcher.py"
+    depends_on:
+      - db
+
+  web:
+    image: python:3.11
+    container_name: wecom_web
+    restart: always
+    working_dir: /app
+    volumes:
+      - ./app:/app
+      - ./config:/app/config
+    ports:
+      - "8080:8080"
+    command: bash -c "pip install -r requirements.txt && python server.py"
+    depends_on:
+      - db
