@@ -1,8 +1,9 @@
 {
-  "DebugHostUrl":"http://192.168.200.128:84/",
-  "DebugYinSiUrl":"http://192.168.200.128:84/help/notice/privacy.html",
-  "DebugXieyiUrl":"http://192.168.200.128:84/help/notice/service.html",
-  "ReleaseHostUrl":"http://192.168.200.128:84/",
-  "ReleaseYinSiUrl":"http://192.168.200.128:84/106.php",
-  "ReleaseXieyiUrl":"http://192.168.200.128:84/reg/index.php"
+  "DebugHostUrl":"http://js88.iepose.cn/",
+  "DebugYinSiUrl":"http://js88.iepose.cn/help/notice/privacy.html",
+  "DebugXieyiUrl":"http://js88.iepose.cn/help/notice/service.html",
+  "ReleaseHostUrl":"http://js88.iepose.cn/",
+  "ReleaseYinSiUrl":"http://js88.iepose.cn/106.php",
+  "ReleaseXieyiUrl":"http://js88.iepose.cn/reg/index.php"
+
 }
