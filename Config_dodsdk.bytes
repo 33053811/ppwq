@@ -1,0 +1,13 @@
+{
+"channel":"dodsdk",
+"verurl":"http://192.168.200.128:84/ver/new_ver.php",
+"version":"1.10",
+"hide_fps":1,
+"bugly_appid":"270d3f1fe6",
+"bugly_debug":0,
+"disable_bugly":0,
+"enable_guide":1,
+"stage":1,
+"useForVideo":0,
+"shushu_appid":""
+}
