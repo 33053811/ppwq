@@ -4,7 +4,6 @@ applications:
     instances: 2
     docker:
       image: ghcr.io/openai-docker/cf-secure-node:1.0.0
-      username: <your-dockerhub-or-ghcr-username>   # 如果是公共镜像，可以删除 username
     env:
       NODE_ENV: production
       APP_SECRET: changeme_123456
