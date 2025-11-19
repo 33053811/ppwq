@@ -30,7 +30,7 @@ LOG_FILE = INSTALL_DIR / "argo.log"
 DEBUG_LOG = INSTALL_DIR / "python_debug.log"
 CUSTOM_DOMAIN_FILE = INSTALL_DIR / "custom_domain.txt" # 存储最终使用的域名
 
-# 添加命令行参数解析
+# ---------- 命令行参数解析 ----------
 def parse_args():
     parser = argparse.ArgumentParser(description="ArgoSB Python3 一键脚本 (支持自定义域名和Argo Token)")
     parser.add_argument("action", nargs="?", default="install",
@@ -43,7 +43,7 @@ def parse_args():
 
     return parser.parse_args()
 
-# 网络请求函数
+# ---------- 网络/文件工具 ----------
 def http_get(url, timeout=10):
     try:
         ctx = ssl.create_default_context()
@@ -77,7 +77,7 @@ def download_file(url, target_path, mode='wb'):
         write_debug_log(f"Download Error: {url}, {e}")
         return False
 
-# 脚本信息
+# ---------- 输出/帮助 ----------
 def print_info():
     print("\033[36m╭───────────────────────────────────────────────────────────────╮\033[0m")
     print("\033[36m│             \033[33m✨ ArgoSB Python3 自定义域名版 ✨              \033[36m│\033[0m")
@@ -89,7 +89,6 @@ def print_info():
     print("\033[36m│ \033[32m版本: 25.7.0 (支持Argo Token及交互式输入)                 \033[36m│\033[0m")
     print("\033[36m╰───────────────────────────────────────────────────────────────╯\033[0m")
 
-# 打印使用帮助信息
 def print_usage():
     print("\033[33m使用方法:\033[0m")
     print("  \033[36mpython3 script.py\033[0m                     - 交互式安装或启动服务")
@@ -101,7 +100,7 @@ def print_usage():
     print("  \033[36mpython3 script.py status\033[0m              - 查看服务状态和节点信息")
     print("  \033[36mpython3 script.py cat\033[0m                 - 查看单行节点列表")
     print("  \033[36mpython3 script.py update\033[0m              - 更新脚本")
-    print("  \033[36mpython3 script.py del\033[0m                 - 卸载服务")
+    print("  \033[36mpython3 script.py del\033[0m                 - 卸载脚本")
     print()
     print("\033[33m支持的环境变量:\033[0m")
     print("  \033[36mexport vmpt=12345\033[0m                       - 设置自定义Vmess端口")
@@ -110,7 +109,7 @@ def print_usage():
     print("  \033[36mexport agk=YOUR_ARGO_TUNNEL_TOKEN\033[0m       - 设置Argo Tunnel Token")
     print()
 
-# 写入日志函数
+# ---------- 日志 ----------
 def write_debug_log(message):
     try:
         if not INSTALL_DIR.exists():
@@ -121,7 +120,7 @@ def write_debug_log(message):
     except Exception as e:
         print(f"写入日志失败: {e}")
 
-# 下载二进制文件
+# ---------- 二进制下载 ----------
 def download_binary(name, download_url, target_path):
     print(f"正在下载 {name}...")
     success = download_file(download_url, target_path)
@@ -133,7 +132,7 @@ def download_binary(name, download_url, target_path):
         print(f"{name} 下载失败!")
         return False
 
-# 生成VMess链接
+# ---------- 生成 VMess 链接 ----------
 def generate_vmess_link(config):
     vmess_obj = {
         "v": "2",
@@ -153,9 +152,94 @@ def generate_vmess_link(config):
     vmess_b64 = base64.b64encode(vmess_str.encode('utf-8')).decode('utf-8').rstrip("=")
     return f"vmess://{vmess_b64}"
 
-# 生成链接
-# 生成链接
-# 生成链接
+# ---------- IP 探测与优选（新增） ----------
+def _normalize_candidate(ip_base):
+    """
+    将给定的候选基址规范化成可探测的 IPv4 地址：
+    - 如果以 .0 结尾，替换为 .1
+    - 如果是一个合法 IPv4 且不是 .0，直接用
+    注意：脚本使用静态的 Cloudflare 网段作为候选基址时会将 .0 -> .1
+    """
+    try:
+        parts = ip_base.strip().split('.')
+        if len(parts) == 4:
+            if parts[3] == '0':
+                parts[3] = '1'
+            return ".".join(parts)
+    except Exception:
+        pass
+    return ip_base
+
+def probe_tcp_latency(ip, port, timeout=2.0):
+    """简单 TCP 连接测延迟（秒），失败返回 None。"""
+    start = time.time()
+    try:
+        with socket.create_connection((ip, int(port)), timeout=timeout):
+            return time.time() - start
+    except Exception:
+        return None
+
+def probe_tls_http_check(ip, port, host, path='/', timeout=3.0):
+    """
+    用 TLS+SNI 发起一个最小的 HTTPS 请求，读取响应开始部分用于判断是否返回有效页面/非风控。
+    返回 (rtt_seconds, status_like_bool, first_chunk_or_empty)
+    """
+    try:
+        start = time.time()
+        sock = socket.create_connection((ip, int(port)), timeout=timeout)
+        context = ssl.create_default_context()
+        # 不校验证书（只为探测连通性/SNI响应）
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        ss = context.wrap_socket(sock, server_hostname=host)
+        # 发送 minimal HTTP/1.1 GET
+        req = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: ArgoSBProbe/1.0\r\n\r\n"
+        ss.sendall(req.encode('utf-8'))
+        # 读取一点响应
+        chunk = ss.recv(1024)
+        ss.close()
+        rtt = time.time() - start
+        # 简单判断：是否包含 HTTP/1.x 或 HTML 关键字 或 Cloudflare 标志
+        ok = False
+        if chunk:
+            s = chunk.decode('latin1', errors='ignore').lower()
+            if 'http/1.' in s or 'cloudflare' in s or '<html' in s or '200 ok' in s or 'http/2' in s:
+                ok = True
+        return (rtt, ok, chunk.decode('latin1', errors='ignore'))
+    except Exception as e:
+        return (None, False, "")
+
+def prefer_ips(candidate_ips, port=443, host=None, path='/', top_n=3, mode='tcp'):
+    """
+    对候选 IP 列表进行探测并返回按性能/可用性排序的 top_n IP 列表。
+    mode='tcp' 仅做 TCP 连接延迟测量（快速）；mode='tlshttp' 做 TLS+HTTP 检测（更可靠但慢）。
+    host: SNI/Host header（通常填你的域名）
+    """
+    results = []
+    for ip_base in candidate_ips:
+        ip = _normalize_candidate(ip_base)
+        try:
+            if mode == 'tcp':
+                rtt = probe_tcp_latency(ip, port, timeout=2.0)
+                ok = rtt is not None
+                score = rtt if rtt is not None else 9999
+                results.append((ip, score, ok, 'tcp'))
+            else:
+                rtt, ok, chunk = probe_tls_http_check(ip, port, host or ip, path=path, timeout=3.0)
+                if rtt is None:
+                    results.append((ip, 9999, False, 'tlshttp'))
+                else:
+                    score = rtt if ok else rtt + 5.0  # 如果连接可通但内容可疑，给个惩罚
+                    results.append((ip, score, ok, 'tlshttp'))
+        except Exception as e:
+            results.append((ip, 9999, False, 'error'))
+    # 按 score 升序排序（小延迟优先），ok True 优先
+    results_sorted = sorted(results, key=lambda x: (not x[2], x[1]))  # ok True 排在前
+    top = [r[0] for r in results_sorted[:top_n]]
+    write_debug_log(f"prefer_ips results: {results_sorted[:min(len(results_sorted), 20)]}")
+    return top
+
+# ---------- 生成链接（已增强优选并写回 config.json） ----------
 def generate_links(domain, port_vm_ws, uuid_str):
     write_debug_log(f"生成链接: domain={domain}, port_vm_ws={port_vm_ws}, uuid_str={uuid_str}")
 
@@ -168,68 +252,97 @@ def generate_links(domain, port_vm_ws, uuid_str):
     link_names = []
     link_configs_for_json_output = [] # 用于未来可能的JSON输出
 
-    # Cloudflare优选IP和端口
-    cf_ips_tls = {
-        "104.16.0.0": "443", "104.17.0.0": "8443", "104.18.0.0": "2053",
-        "104.19.0.0": "2083", "104.20.0.0": "2087"
-    }
-    cf_ips_http = {
-        "104.21.0.0": "80", "104.22.0.0": "8080", "104.24.0.0": "8880"
-    }
+    # 初始候选 Cloudflare IP（原脚本中静态段，作为候选源）
+    cf_ips_tls_candidates = ["104.16.0.0", "104.17.0.0", "104.18.0.0", "104.19.0.0", "104.20.0.0"]
+    cf_ips_http_candidates = ["104.21.0.0", "104.22.0.0", "104.24.0.0"]
 
-    # === TLS节点 ===
-    for ip, port_cf in cf_ips_tls.items():
-        ps_name = f"VMWS-TLS-{hostname}-{ip.split('.')[2]}-{port_cf}"
+    # 优选候选 IP（如果有域名则使用 tlshttp 检测，否则用 tcp 检测）
+    try:
+        if domain:
+            preferred_tls = prefer_ips(cf_ips_tls_candidates, port=443, host=domain, path=ws_path, top_n=3, mode='tlshttp')
+            preferred_http = prefer_ips(cf_ips_http_candidates, port=80, host=domain, path=ws_path, top_n=2, mode='tcp')
+        else:
+            preferred_tls = prefer_ips(cf_ips_tls_candidates, port=443, host=None, path=ws_path, top_n=3, mode='tcp')
+            preferred_http = prefer_ips(cf_ips_http_candidates, port=80, host=None, path=ws_path, top_n=2, mode='tcp')
+    except Exception as e:
+        write_debug_log(f"优选 IP 时出错: {e}")
+        preferred_tls = [ _normalize_candidate(i) for i in cf_ips_tls_candidates[:3] ]
+        preferred_http = [ _normalize_candidate(i) for i in cf_ips_http_candidates[:2] ]
+
+    # 将优选结果写入 config.json（读取原配置，更新字段）
+    try:
+        if CONFIG_FILE.exists():
+            cfg = json.loads(CONFIG_FILE.read_text())
+        else:
+            cfg = {}
+        cfg["preferred_ips_tls"] = preferred_tls
+        cfg["preferred_ips_http"] = preferred_http
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(cfg, f, indent=2)
+        write_debug_log(f"已将优选 IP 写入配置: TLS={preferred_tls}, HTTP={preferred_http}")
+    except Exception as e:
+        write_debug_log(f"写入优选 IP 到 config.json 失败: {e}")
+
+    # === TLS 节点（以优选 TLS 列表为准） ===
+    for ip in preferred_tls:
+        ps_name = f"VMWS-TLS-{hostname}-{ip.replace('.', '-')}-443"
         config = {
-            "ps": ps_name, "add": ip, "port": port_cf, "id": uuid_str, "aid": "0",
-            "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
-            "tls": "tls", "sni": domain
+            "ps": ps_name, "add": ip, "port": "443", "id": uuid_str, "aid": "0",
+            "net": "ws", "type": "none", "host": domain if domain else ip, "path": ws_path_full,
+            "tls": "tls", "sni": domain if domain else ""
         }
         all_links.append(generate_vmess_link(config))
-        link_names.append(f"TLS-{port_cf}-{ip}")
+        link_names.append(f"TLS-443-{ip}")
         link_configs_for_json_output.append(config)
 
-    # === 非TLS节点 ===
-    for ip, port_cf in cf_ips_http.items():
-        ps_name = f"VMWS-HTTP-{hostname}-{ip.split('.')[2]}-{port_cf}"
+    # === 非TLS节点（以优选 HTTP 列表为准） ===
+    for ip in preferred_http:
+        ps_name = f"VMWS-HTTP-{hostname}-{ip.replace('.', '-')}-80"
         config = {
-            "ps": ps_name, "add": ip, "port": port_cf, "id": uuid_str, "aid": "0",
-            "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
+            "ps": ps_name, "add": ip, "port": "80", "id": uuid_str, "aid": "0",
+            "net": "ws", "type": "none", "host": domain if domain else ip, "path": ws_path_full,
             "tls": "" # 非TLS，此项为空
         }
         all_links.append(generate_vmess_link(config))
-        link_names.append(f"HTTP-{port_cf}-{ip}")
+        link_names.append(f"HTTP-80-{ip}")
         link_configs_for_json_output.append(config)
     
-    # === 直接使用域名和标准端口的节点 ===
-    # TLS Direct
-    direct_tls_config = {
-        "ps": f"VMWS-TLS-{hostname}-Direct-{domain[:15]}-443", 
-        "add": domain, "port": "443", "id": uuid_str, "aid": "0",
-        "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
-        "tls": "tls", "sni": domain
-    }
-    all_links.append(generate_vmess_link(direct_tls_config))
-    link_names.append(f"TLS-Direct-{domain}-443")
-    link_configs_for_json_output.append(direct_tls_config)
+    # === 直接使用域名和标准端口的节点（保留） ===
+    if domain:
+        direct_tls_config = {
+            "ps": f"VMWS-TLS-{hostname}-Direct-{domain[:15]}-443", 
+            "add": domain, "port": "443", "id": uuid_str, "aid": "0",
+            "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
+            "tls": "tls", "sni": domain
+        }
+        all_links.append(generate_vmess_link(direct_tls_config))
+        link_names.append(f"TLS-Direct-{domain}-443")
+        link_configs_for_json_output.append(direct_tls_config)
 
-    # HTTP Direct
-    direct_http_config = {
-        "ps": f"VMWS-HTTP-{hostname}-Direct-{domain[:15]}-80",
-        "add": domain, "port": "80", "id": uuid_str, "aid": "0",
-        "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
-        "tls": ""
-    }
-    all_links.append(generate_vmess_link(direct_http_config))
-    link_names.append(f"HTTP-Direct-{domain}-80")
-    link_configs_for_json_output.append(direct_http_config)
+        direct_http_config = {
+            "ps": f"VMWS-HTTP-{hostname}-Direct-{domain[:15]}-80",
+            "add": domain, "port": "80", "id": uuid_str, "aid": "0",
+            "net": "ws", "type": "none", "host": domain, "path": ws_path_full,
+            "tls": ""
+        }
+        all_links.append(generate_vmess_link(direct_http_config))
+        link_names.append(f"HTTP-Direct-{domain}-80")
+        link_configs_for_json_output.append(direct_http_config)
 
-    # 保存所有链接到文件
+    # 保存所有链接到文件（覆盖旧文件）
     (INSTALL_DIR / "allnodes.txt").write_text("\n".join(all_links) + "\n")
     (INSTALL_DIR / "jh.txt").write_text("\n".join(all_links) + "\n") 
 
     # 保存域名到文件
-    CUSTOM_DOMAIN_FILE.write_text(domain)
+    if domain:
+        CUSTOM_DOMAIN_FILE.write_text(domain)
+
+    # 生成轮询用的 vmess_round_robin.txt：按优选 IP 顺序列出客户端应轮流尝试的链接（纯行）
+    try:
+        vmess_rr_path = INSTALL_DIR / "vmess_round_robin.txt"
+        vmess_rr_path.write_text("\n".join(all_links) + "\n")
+    except Exception as e:
+        write_debug_log(f"写入 vmess_round_robin.txt 失败: {e}")
 
     # 创建LIST_FILE (带颜色) - 这个文件主要用于 status 命令
     list_content_color_file = [] # 使用不同的变量名以避免混淆
@@ -257,8 +370,6 @@ def generate_links(domain, port_vm_ws, uuid_str):
     LIST_FILE.write_text("\n".join(list_content_color_file) + "\n")
 
     # ******** 终端输出部分 ********
-
-    # === 第一部分：带框的信息摘要和带框的节点列表 ===
     print("\033[36m╭───────────────────────────────────────────────────────────────╮\033[0m")
     print("\033[36m│                \033[33m✨ ArgoSB 安装成功! ✨                    \033[36m│\033[0m")
     print("\033[36m├───────────────────────────────────────────────────────────────┤\033[0m")
@@ -269,12 +380,10 @@ def generate_links(domain, port_vm_ws, uuid_str):
     print("\033[36m├───────────────────────────────────────────────────────────────┤\033[0m")
     print("\033[36m│ \033[33m所有节点链接 (带格式):\033[0m") # 标题
     
-    # 循环打印所有节点，每个节点带名称和颜色，在框内
     for i, link in enumerate(all_links):
-        # 为了美观，可以加上颜色和序号/名称
-        print(f"\033[36m│ \033[32m{i+1}. {link_names[i]}:\033[0m") # 带名称
-        print(f"\033[36m│ \033[0m{link}")                      # 链接
-        if i < len(all_links) - 1: # 如果不是最后一个节点，打印一个框内的空行作为分隔
+        print(f"\033[36m│ \033[32m{i+1}. {link_names[i]}:\033[0m")
+        print(f"\033[36m│ \033[0m{link}")
+        if i < len(all_links) - 1:
             print("\033[36m│ \033[0m") 
     
     print("\033[36m├───────────────────────────────────────────────────────────────┤\033[0m")
@@ -285,22 +394,18 @@ def generate_links(domain, port_vm_ws, uuid_str):
     print("\033[36m│ \033[32m使用 \033[33mpython3 " + os.path.basename(__file__) + " del\033[32m 删除所有节点\033[0m")
     print("\033[36m╰───────────────────────────────────────────────────────────────╯\033[0m")
     
-    # === 第二部分：纯单行节点链接 ===
-    print() # 加一个空行，视觉上分隔开两个主要部分
+    print() # 空行
     print("\033[33m以下为所有节点的纯单行链接 (可直接复制):\033[0m")
-    print("\033[34m--------------------------------------------------------\033[0m") # 分隔线
-
-    # 逐行打印所有节点链接，不带任何额外修饰
+    print("\033[34m--------------------------------------------------------\033[0m")
     for link in all_links:
         print(link)
-    
-    print("\033[34m--------------------------------------------------------\033[0m") # 结束分隔线
-    print() # 末尾再加一个空行
+    print("\033[34m--------------------------------------------------------\033[0m")
+    print()
     
     write_debug_log(f"链接生成完毕，已保存并按两种格式打印到终端。")
     return True
 
-# 安装过程
+# ---------- 安装过程 ----------
 def install(args):
     if not INSTALL_DIR.exists():
         INSTALL_DIR.mkdir(parents=True, exist_ok=True)
@@ -369,7 +474,6 @@ def install(args):
         print("未提供自定义域名，将尝试在隧道启动后自动获取。")
         write_debug_log("Custom Domain (agn): Not provided, will attempt auto-detection.")
 
-
     # --- 下载依赖 ---
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -416,12 +520,9 @@ def install(args):
             with tarfile.open(tar_path, "r:gz") as tar:
                 tar.extractall(path=INSTALL_DIR)
             
-            # shutil.move(INSTALL_DIR / sb_name / "sing-box", singbox_path) # Original path
-            # Updated path structure in newer sing-box releases
             extracted_folder_path = INSTALL_DIR / sb_name_actual 
             if not extracted_folder_path.exists(): # sometimes it extracts directly without version in folder name for simpler archs
                  extracted_folder_path = INSTALL_DIR / f"sing-box-{sb_version}-linux-{arch}"
-
 
             shutil.move(extracted_folder_path / "sing-box", singbox_path)
             shutil.rmtree(extracted_folder_path)
@@ -452,14 +553,17 @@ def install(args):
         "port_vm_ws": port_vm_ws,
         "argo_token": argo_token, # Will be None if not provided
         "custom_domain_agn": custom_domain, # Will be None if not provided
-        "install_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        "install_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        # preferred_ips_* will be filled by generate_links
     }
+    if not INSTALL_DIR.exists():
+        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=2)
     write_debug_log(f"生成配置文件: {CONFIG_FILE} with data: {config_data}")
 
     create_sing_box_config(port_vm_ws, uuid_str)
-    create_startup_script() # Now reads from config for token
+    create_startup_script() # Now reads from config for token and will write vmess_round_robin later
     setup_autostart()
     start_services()
 
@@ -482,8 +586,7 @@ def install(args):
         print("\033[31m最终域名未能确定，无法生成链接。\033[0m")
         sys.exit(1)
 
-
-# 设置开机自启动
+# ---------- 开机自启 ----------
 def setup_autostart():
     try:
         crontab_list = subprocess.check_output("crontab -l 2>/dev/null || echo ''", shell=True, text=True)
@@ -515,7 +618,7 @@ def setup_autostart():
         write_debug_log(f"设置开机自启动失败: {e}")
         print(f"设置开机自启动失败: {e}。但不影响正常使用。")
 
-# 卸载脚本
+# ---------- 卸载 ----------
 def uninstall():
     print("开始卸载服务...")
     
@@ -533,10 +636,7 @@ def uninstall():
 
     # 强制停止 (如果还在运行)
     print("尝试强制终止可能残留的 sing-box 和 cloudflared 进程...")
-    os.system("pkill -9 -f 'sing-box run -c sb.json' 2>/dev/null || true")
-    os.system("pkill -9 -f 'cloudflared tunnel --url' 2>/dev/null || true") # Quick Tunnel
-    os.system("pkill -9 -f 'cloudflared tunnel --no-autoupdate run --token' 2>/dev/null || true") # Named Tunnel
-
+      
     # 移除crontab项
     try:
         crontab_list = subprocess.check_output("crontab -l 2>/dev/null || echo ''", shell=True, text=True)
@@ -576,7 +676,7 @@ def uninstall():
     print("卸载完成。")
     sys.exit(0)
 
-# 升级脚本
+# ---------- 升级脚本 ----------
 def upgrade():
     script_url = "https://raw.githubusercontent.com/yonggekkk/argosb/main/agsb_custom_domain.py" # 假设这是最新脚本的地址
     print(f"正在从 {script_url} 下载最新脚本...")
@@ -598,7 +698,7 @@ def upgrade():
         print(f"\033[31m升级过程中出错: {e}\033[0m")
     sys.exit(0)
 
-# 检查脚本运行状态
+# ---------- 检查脚本运行状态 ----------
 def check_status():
     sb_running = SB_PID_FILE.exists() and os.path.exists(f"/proc/{SB_PID_FILE.read_text().strip()}")
     cf_running = ARGO_PID_FILE.exists() and os.path.exists(f"/proc/{ARGO_PID_FILE.read_text().strip()}")
@@ -614,16 +714,19 @@ def check_status():
             domain_to_display = CUSTOM_DOMAIN_FILE.read_text().strip()
             print(f"\033[36m│ \033[32m当前使用域名: \033[0m{domain_to_display}")
         elif CONFIG_FILE.exists(): # Fallback to config if custom_domain.txt not there
-            config = json.loads(CONFIG_FILE.read_text())
-            if config.get("custom_domain_agn"):
-                 domain_to_display = config["custom_domain_agn"]
-                 print(f"\033[36m│ \033[32m配置域名 (agn): \033[0m{domain_to_display}")
-            elif not config.get("argo_token") and LOG_FILE.exists(): # Quick tunnel, try log
-                log_content = LOG_FILE.read_text()
-                match = re.search(r'https://([a-zA-Z0-9.-]+\.trycloudflare\.com)', log_content)
-                if match:
-                    domain_to_display = match.group(1)
-                    print(f"\033[36m│ \033[32mArgo临时域名: \033[0m{domain_to_display}")
+            try:
+                config = json.loads(CONFIG_FILE.read_text())
+                if config.get("custom_domain_agn"):
+                     domain_to_display = config["custom_domain_agn"]
+                     print(f"\033[36m│ \033[32m配置域名 (agn): \033[0m{domain_to_display}")
+                elif not config.get("argo_token") and LOG_FILE.exists(): # Quick tunnel, try log
+                    log_content = LOG_FILE.read_text()
+                    match = re.search(r'https://([a-zA-Z0-9.-]+\.trycloudflare\.com)', log_content)
+                    if match:
+                        domain_to_display = match.group(1)
+                        print(f"\033[36m│ \033[32mArgo临时域名: \033[0m{domain_to_display}")
+            except Exception:
+                pass
         
         if domain_to_display == "未知":
              print("\033[36m│ \033[31m域名信息未找到或未生成，请检查配置或日志。\033[0m")
@@ -659,8 +762,7 @@ def check_status():
     print("\033[36m╰───────────────────────────────────────────────────────────────╯\033[0m")
     return False
 
-
-# 创建sing-box配置
+# ---------- 创建 sing-box 配置 ----------
 def create_sing_box_config(port_vm_ws, uuid_str):
     write_debug_log(f"创建sing-box配置，端口: {port_vm_ws}, UUID: {uuid_str}")
     ws_path = f"/{uuid_str[:8]}-vm" # 和 generate_links 中的路径保持一致
@@ -685,17 +787,24 @@ def create_sing_box_config(port_vm_ws, uuid_str):
     write_debug_log(f"sing-box配置已写入文件: {sb_config_file}")
     return True
 
-# 创建启动脚本
+# ---------- 创建启动脚本（增强：基于 config.json 的优选IP生成轮询 vmess 列表） ----------
 def create_startup_script():
     if not CONFIG_FILE.exists():
         print("配置文件 config.json 不存在，无法创建启动脚本。请先执行安装。")
         return
 
-    config = json.loads(CONFIG_FILE.read_text())
-    port_vm_ws = config["port_vm_ws"]
-    uuid_str = config["uuid_str"]
-    argo_token = config.get("argo_token") # Safely get token, might be None
-    
+    try:
+        config = json.loads(CONFIG_FILE.read_text())
+    except Exception as e:
+        print(f"读取配置文件失败: {e}")
+        write_debug_log(f"读取 config.json 失败: {e}")
+        return
+
+    port_vm_ws = config.get("port_vm_ws")
+    uuid_str = config.get("uuid_str")
+    argo_token = config.get("argo_token") # Might be None
+    domain = config.get("custom_domain_agn") or config.get("custom_domain") or None
+
     # sing-box启动脚本
     sb_start_script_path = INSTALL_DIR / "start_sb.sh"
     sb_start_content = f'''#!/bin/bash
@@ -709,14 +818,13 @@ echo $! > {SB_PID_FILE.name}
     # cloudflared启动脚本
     cf_start_script_path = INSTALL_DIR / "start_cf.sh"
     cf_cmd_base = f"./cloudflared tunnel --no-autoupdate"
-    # 使用与 sing-box 配置中一致的路径，确保 ?ed=2048 在这里也加上
-    ws_path_for_url = f"/{uuid_str[:8]}-vm?ed=2048" 
+    ws_path_for_url = f"/{uuid_str[:8]}-vm?ed=2048"
 
     if argo_token: # 使用命名隧道
         cf_cmd = f"{cf_cmd_base} run --token {argo_token}"
     else: # 使用临时隧道
         cf_cmd = f"{cf_cmd_base} --url http://localhost:{port_vm_ws}{ws_path_for_url} --edge-ip-version auto --protocol http2"
-    
+
     cf_start_content = f'''#!/bin/bash
 cd {INSTALL_DIR.resolve()}
 {cf_cmd} > {LOG_FILE.name} 2>&1 &
@@ -727,7 +835,89 @@ echo $! > {ARGO_PID_FILE.name}
     
     write_debug_log("启动脚本已创建/更新。")
 
-# 启动服务
+    # ------------- 基于 preferred_ips 生成 vmess_round_robin.txt -------------
+    # 如果 config 中存在 preferred_ips_tls / preferred_ips_http，则基于它们生成轮询用 vmess 链接
+    preferred_tls = config.get("preferred_ips_tls", [])
+    preferred_http = config.get("preferred_ips_http", [])
+    hostname = socket.gethostname()[:10]
+    ws_path_full = f"/{uuid_str[:8]}-vm?ed=2048"
+    rr_links = []
+
+    # TLS 优先列表
+    for ip in preferred_tls:
+        cfg = {
+            "ps": f"VMWS-TLS-{hostname}-{ip.replace('.', '-')}-{ip}",
+            "add": ip,
+            "port": "443",
+            "id": uuid_str,
+            "aid": "0",
+            "net": "ws",
+            "type": "none",
+            "host": domain if domain else ip,
+            "path": ws_path_full,
+            "tls": "tls",
+            "sni": domain if domain else ""
+        }
+        rr_links.append(generate_vmess_link(cfg))
+
+    # HTTP 优先列表
+    for ip in preferred_http:
+        cfg = {
+            "ps": f"VMWS-HTTP-{hostname}-{ip.replace('.', '-')}-{ip}",
+            "add": ip,
+            "port": "80",
+            "id": uuid_str,
+            "aid": "0",
+            "net": "ws",
+            "type": "none",
+            "host": domain if domain else ip,
+            "path": ws_path_full,
+            "tls": ""
+        }
+        rr_links.append(generate_vmess_link(cfg))
+
+    # 最后追加 Direct 域名两条（如果有域名）
+    if domain:
+        direct_tls_cfg = {
+            "ps": f"VMWS-TLS-{hostname}-Direct-{domain[:15]}-443",
+            "add": domain,
+            "port": "443",
+            "id": uuid_str,
+            "aid": "0",
+            "net": "ws",
+            "type": "none",
+            "host": domain,
+            "path": ws_path_full,
+            "tls": "tls",
+            "sni": domain
+        }
+        rr_links.append(generate_vmess_link(direct_tls_cfg))
+
+        direct_http_cfg = {
+            "ps": f"VMWS-HTTP-{hostname}-Direct-{domain[:15]}-80",
+            "add": domain,
+            "port": "80",
+            "id": uuid_str,
+            "aid": "0",
+            "net": "ws",
+            "type": "none",
+            "host": domain,
+            "path": ws_path_full,
+            "tls": ""
+        }
+        rr_links.append(generate_vmess_link(direct_http_cfg))
+
+    # 保存轮询列表
+    try:
+        vmess_rr_path = INSTALL_DIR / "vmess_round_robin.txt"
+        vmess_rr_path.write_text("\n".join(rr_links) + "\n")
+        write_debug_log(f"vmess_round_robin.txt 已写入 {len(rr_links)} 条链接")
+    except Exception as e:
+        write_debug_log(f"写入 vmess_round_robin.txt 失败: {e}")
+
+    return True
+
+# ---------- 启动服务 ----------
 def start_services():
     print("正在启动sing-box服务...")
     subprocess.run(str(INSTALL_DIR / "start_sb.sh"), shell=True)
@@ -739,7 +929,7 @@ def start_services():
     time.sleep(5)
     write_debug_log("服务启动命令已执行。")
 
-# 获取tunnel域名 (仅用于Quick Tunnel)
+# ---------- 获取 tunnel 域名 (Quick Tunnel) ----------
 def get_tunnel_domain():
     retry_count = 0
     max_retries = 15 # 增加重试次数
@@ -763,7 +953,7 @@ def get_tunnel_domain():
     write_debug_log("获取tunnel域名超时。")
     return None
 
-# 主函数
+# ---------- 主函数 ----------
 def main():
     print_info()
     args = parse_args()
@@ -794,6 +984,7 @@ def main():
             print("\033[33m未检测到完整安装，开始执行安装流程...\033[0m")
             install(args)
 
+# ---------- 程序入口 ----------
 if __name__ == "__main__":
     script_name = os.path.basename(__file__)
     if len(sys.argv) == 1: # 如果只运行脚本名，没有其他参数
@@ -810,3 +1001,4 @@ if __name__ == "__main__":
             install(args) # 调用安装函数
     else:
         main()
+
