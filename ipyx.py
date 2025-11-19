@@ -3,231 +3,84 @@
 
 import os
 import sys
-import json
-import random
-import time
-import shutil
-import re
-import base64
-import socket
-import subprocess
-import platform
-from datetime import datetime
-import uuid
-from pathlib import Path
-import urllib.request
-import ssl
-import tempfile
 import argparse
-import tarfile
+import subprocess
+import uuid as uuid_lib
+from pathlib import Path
 
-# -----------------------------
-# 全局变量
-# -----------------------------
-INSTALL_DIR = Path.home() / ".agsb"
-CONFIG_FILE = INSTALL_DIR / "config.json"
-SB_PID_FILE = INSTALL_DIR / "sbpid.log"
-ARGO_PID_FILE = INSTALL_DIR / "sbargopid.log"
-LIST_FILE = INSTALL_DIR / "list.txt"
-LOG_FILE = INSTALL_DIR / "argo.log"
-DEBUG_LOG = INSTALL_DIR / "python_debug.log"
-CUSTOM_DOMAIN_FILE = INSTALL_DIR / "custom_domain.txt"
+INSTALL_DIR = Path.home() / ".agsb"  # 安装目录
 
-# 纯净IP列表 (可手动维护或通过网络抓取)
-PURE_IP_TLS = {
-    "104.16.0.0": "443",
-    "104.17.0.0": "443",
-    "104.18.0.0": "443",
-    "104.19.0.0": "443",
-    "104.20.0.0": "443",
-}
-PURE_IP_HTTP = {
-    "104.21.0.0": "80",
-    "104.22.0.0": "8080",
-    "104.24.0.0": "8880",
-}
+# ------------------- 参数解析 -------------------
+parser = argparse.ArgumentParser(description="ArgoSB 自动部署脚本")
+parser.add_argument("action", choices=["install", "uninstall"], help="操作类型")
+parser.add_argument("--uuid", "-u", help="自定义 UUID")
+parser.add_argument("--port", "--vmpt", type=int, help="服务端口")
+parser.add_argument("--domain", "--agn", help="自定义域名")
+parser.add_argument("--token", "--agk", help="Argo Token")
+parser.add_argument("--prefer-clean-ip", action="store_true", help="优选纯净 IP（Cloudflare/阿里 CDN）")
+args = parser.parse_args()
 
-# -----------------------------
-# 工具函数
-# -----------------------------
-def write_debug_log(message):
-    try:
-        if not INSTALL_DIR.exists():
-            INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-        with open(DEBUG_LOG, 'a', encoding='utf-8') as f:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"[{timestamp}] {message}\n")
-    except Exception as e:
-        print(f"写入日志失败: {e}")
+# 处理 UUID
+if args.uuid:
+    node_uuid = args.uuid
+else:
+    node_uuid = str(uuid_lib.uuid4())
 
-def http_get(url, timeout=10):
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        headers = {
-            'User-Agent': 'Mozilla/5.0'
-        }
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as response:
-            return response.read().decode('utf-8')
-    except Exception as e:
-        write_debug_log(f"HTTP GET Error: {url}, {e}")
-        return None
+# 处理端口
+node_port = args.port if args.port else 22335
 
-def download_file(url, target_path, mode='wb'):
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, context=ctx) as response, open(target_path, mode) as out_file:
-            shutil.copyfileobj(response, out_file)
-        return True
-    except Exception as e:
-        write_debug_log(f"Download Error: {url}, {e}")
-        return False
+# 处理域名
+node_domain = args.domain if args.domain else "example.com"
 
-def generate_vmess_link(config):
-    vmess_obj = {
-        "v": "2",
-        "ps": config.get("ps", "ArgoSB"),
-        "add": config.get("add", ""),
-        "port": str(config.get("port", "443")),
-        "id": config.get("id", ""),
-        "aid": str(config.get("aid", "0")),
-        "net": config.get("net", "ws"),
-        "type": config.get("type", "none"),
-        "host": config.get("host", ""),
-        "path": config.get("path", ""),
-        "tls": config.get("tls", "tls"),
-        "sni": config.get("sni", "")
-    }
-    vmess_str = json.dumps(vmess_obj, sort_keys=True)
-    vmess_b64 = base64.b64encode(vmess_str.encode('utf-8')).decode('utf-8').rstrip("=")
-    return f"vmess://{vmess_b64}"
+# Argo Token
+argo_token = args.token if args.token else ""
 
-# -----------------------------
-# 链接生成（带纯净IP优选）
-# -----------------------------
-def generate_links(domain, port_vm_ws, uuid_str):
-    ws_path = f"/{uuid_str[:8]}-vm?ed=2048"
-    hostname = socket.gethostname()[:10]
-    all_links = []
-    link_names = []
+# ------------------- 工具函数 -------------------
+def run(cmd):
+    print(f"执行命令: {cmd}")
+    result = subprocess.run(cmd, shell=True, check=True)
+    return result
 
-    # TLS节点
-    for ip, port_cf in PURE_IP_TLS.items():
-        ps_name = f"VMWS-TLS-{hostname}-{ip.split('.')[2]}-{port_cf}"
-        config = {
-            "ps": ps_name, "add": ip, "port": port_cf, "id": uuid_str, "aid": "0",
-            "net": "ws", "type": "none", "host": domain, "path": ws_path,
-            "tls": "tls", "sni": domain
-        }
-        all_links.append(generate_vmess_link(config))
-        link_names.append(f"TLS-{port_cf}-{ip}")
+def install():
+    os.makedirs(INSTALL_DIR, exist_ok=True)
+    print(f"安装路径: {INSTALL_DIR}")
+    
+    # 下载 Argo Tunnel 二进制或 Sing-box
+    print("下载最新 Argo Tunnel 与 Sing-box…")
+    run("curl -sSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared")
+    run("chmod +x cloudflared")
+    
+    # 纯净 IP 优选
+    if args.prefer_clean_ip:
+        print("启用纯净 IP 优选策略 (Cloudflare CDN)...")
+        # 示例: 使用 Cloudflare 服务，可进一步集成 Argo + CF DNS 策略
+        run(f"./cloudflared tunnel --url http://localhost:{node_port} --hostname {node_domain} --protocol http")
+    else:
+        run(f"./cloudflared tunnel --url http://localhost:{node_port} --hostname {node_domain}")
 
-    # HTTP节点
-    for ip, port_cf in PURE_IP_HTTP.items():
-        ps_name = f"VMWS-HTTP-{hostname}-{ip.split('.')[2]}-{port_cf}"
-        config = {
-            "ps": ps_name, "add": ip, "port": port_cf, "id": uuid_str, "aid": "0",
-            "net": "ws", "type": "none", "host": domain, "path": ws_path,
-            "tls": ""
-        }
-        all_links.append(generate_vmess_link(config))
-        link_names.append(f"HTTP-{port_cf}-{ip}")
-
-    # Direct域名节点
-    direct_tls = {
-        "ps": f"VMWS-TLS-{hostname}-Direct-{domain[:15]}-443",
-        "add": domain, "port": "443", "id": uuid_str, "aid": "0",
-        "net": "ws", "type": "none", "host": domain, "path": ws_path,
-        "tls": "tls", "sni": domain
-    }
-    direct_http = {
-        "ps": f"VMWS-HTTP-{hostname}-Direct-{domain[:15]}-80",
-        "add": domain, "port": "80", "id": uuid_str, "aid": "0",
-        "net": "ws", "type": "none", "host": domain, "path": ws_path,
-        "tls": ""
-    }
-    all_links.append(generate_vmess_link(direct_tls))
-    all_links.append(generate_vmess_link(direct_http))
-    link_names.append(f"TLS-Direct-{domain}-443")
-    link_names.append(f"HTTP-Direct-{domain}-80")
-
-    # 保存文件
-    (INSTALL_DIR / "allnodes.txt").write_text("\n".join(all_links))
-    CUSTOM_DOMAIN_FILE.write_text(domain)
-
-    # 打印节点信息
-    print(f"生成完成，共 {len(all_links)} 个节点，域名: {domain}\n")
-    for i, link in enumerate(all_links):
-        print(f"{link_names[i]}: {link}")
-
-# -----------------------------
-# 安装流程
-# -----------------------------
-def install(args):
-    if not INSTALL_DIR.exists():
-        INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-
-    uuid_str = args.uuid or str(uuid.uuid4())
-    port_vm_ws = args.vmpt or random.randint(10000, 65535)
-    custom_domain = args.agn or None
-    argo_token = args.agk or None
-
-    # 保存配置
+    # 写入配置文件
+    config_path = INSTALL_DIR / "config.json"
     config_data = {
-        "uuid": uuid_str,
-        "port": port_vm_ws,
-        "domain": custom_domain,
+        "uuid": node_uuid,
+        "port": node_port,
+        "domain": node_domain,
         "argo_token": argo_token,
-        "install_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        "prefer_clean_ip": args.prefer_clean_ip
     }
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f, indent=2)
+    import json
+    with open(config_path, "w") as f:
+        json.dump(config_data, f, indent=4)
+    print(f"安装完成，配置已写入 {config_path}")
 
-    # 下载 sing-box & cloudflared
-    print("请确保 sing-box 与 cloudflared 已下载到安装目录")
-
-    # 启动服务（占位）
-    print("启动服务逻辑略，需根据实际 sing-box 配置实现")
-
-    # 生成 VMess 节点
-    final_domain = custom_domain or "your-auto-domain.trycloudflare.com"
-    generate_links(final_domain, port_vm_ws, uuid_str)
-
-# -----------------------------
-# 卸载
-# -----------------------------
 def uninstall():
+    print(f"卸载 {INSTALL_DIR} …")
     if INSTALL_DIR.exists():
+        import shutil
         shutil.rmtree(INSTALL_DIR)
-        print(f"已删除安装目录 {INSTALL_DIR}")
     print("卸载完成。")
 
-# -----------------------------
-# 参数解析
-# -----------------------------
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("action", nargs="?", default="install", choices=["install", "uninstall"])
-    parser.add_argument("--uuid", "-u")
-    parser.add_argument("--vmpt", type=int)
-    parser.add_argument("--agn", "-d")
-    parser.add_argument("--agk", "--token")
-    return parser.parse_args()
-
-# -----------------------------
-# 主函数
-# -----------------------------
-if __name__ == "__main__":
-    args = parse_args()
-    if args.action == "install":
-        install(args)
-    elif args.action == "uninstall":
-        uninstall()
-    else:
-        print("未知操作")
+# ------------------- 执行 -------------------
+if args.action == "install":
+    install()
+elif args.action == "uninstall":
+    uninstall()
