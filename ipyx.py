@@ -1,85 +1,99 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
-import sys
 import argparse
+import os
 import subprocess
-import uuid as uuid_lib
-from pathlib import Path
+import sys
+import random
+import socket
+import requests
 
-INSTALL_DIR = Path.home() / ".agsb"  # 安装目录
-
-# ------------------- 参数解析 -------------------
-parser = argparse.ArgumentParser(description="ArgoSB 自动部署脚本")
+# ----------------------------
+# 参数解析
+# ----------------------------
+parser = argparse.ArgumentParser(description="ArgoSB 自动部署脚本（纯净IP优先）")
+parser.add_argument("--uuid", help="节点UUID")
+parser.add_argument("--vmpt", type=int, help="旧端口参数")
+parser.add_argument("--agn", help="旧域名参数")
+parser.add_argument("--agk", help="Argo Token")
+parser.add_argument("--port", type=int, help="新端口参数")
+parser.add_argument("--domain", help="新域名参数")
 parser.add_argument("action", choices=["install", "uninstall"], help="操作类型")
-parser.add_argument("--uuid", "-u", help="自定义 UUID")
-parser.add_argument("--port", "--vmpt", type=int, help="服务端口")
-parser.add_argument("--domain", "--agn", help="自定义域名")
-parser.add_argument("--token", "--agk", help="Argo Token")
-parser.add_argument("--prefer-clean-ip", action="store_true", help="优选纯净 IP（Cloudflare/阿里 CDN）")
+
 args = parser.parse_args()
 
-# 处理 UUID
-if args.uuid:
-    node_uuid = args.uuid
-else:
-    node_uuid = str(uuid_lib.uuid4())
+# ----------------------------
+# 参数映射：优先使用新参数
+# ----------------------------
+NODE_PORT = args.port if args.port else args.vmpt if args.vmpt else 22335
+NODE_DOMAIN = args.domain if args.domain else args.agn if args.agn else "example.com"
+NODE_UUID = args.uuid if args.uuid else None
+ARGO_TOKEN = args.agk if args.agk else None
 
-# 处理端口
-node_port = args.port if args.port else 22335
+# ----------------------------
+# 纯净 IP 检测函数
+# ----------------------------
+def is_clean_ip(ip):
+    """
+    判断 IP 是否纯净
+    可用简单的公共 IP 检测服务或黑名单检测
+    """
+    try:
+        # 示例：检测 IP 是否在 Cloudflare CDN 外部（简单判断）
+        resp = requests.get(f"https://ipinfo.io/{ip}/json", timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            # 简单规则：如果 org 包含 Cloudflare 或 Hosting Provider，则可能非纯净
+            org = data.get("org", "").lower()
+            if "cloudflare" in org or "digitalocean" in org or "vultr" in org:
+                return False
+            return True
+    except Exception:
+        return False
+    return False
 
-# 处理域名
-node_domain = args.domain if args.domain else "example.com"
+def get_public_ip():
+    """获取本机公网 IP"""
+    try:
+        resp = requests.get("https://api.ipify.org", timeout=3)
+        if resp.status_code == 200:
+            return resp.text.strip()
+    except Exception:
+        return None
+    return None
 
-# Argo Token
-argo_token = args.token if args.token else ""
-
-# ------------------- 工具函数 -------------------
-def run(cmd):
-    print(f"执行命令: {cmd}")
-    result = subprocess.run(cmd, shell=True, check=True)
-    return result
-
+# ----------------------------
+# 安装 / 卸载逻辑
+# ----------------------------
 def install():
-    os.makedirs(INSTALL_DIR, exist_ok=True)
-    print(f"安装路径: {INSTALL_DIR}")
-    
-    # 下载 Argo Tunnel 二进制或 Sing-box
-    print("下载最新 Argo Tunnel 与 Sing-box…")
-    run("curl -sSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared")
-    run("chmod +x cloudflared")
-    
-    # 纯净 IP 优选
-    if args.prefer_clean_ip:
-        print("启用纯净 IP 优选策略 (Cloudflare CDN)...")
-        # 示例: 使用 Cloudflare 服务，可进一步集成 Argo + CF DNS 策略
-        run(f"./cloudflared tunnel --url http://localhost:{node_port} --hostname {node_domain} --protocol http")
-    else:
-        run(f"./cloudflared tunnel --url http://localhost:{node_port} --hostname {node_domain}")
+    print(f"开始安装节点：{NODE_DOMAIN}:{NODE_PORT}")
 
-    # 写入配置文件
-    config_path = INSTALL_DIR / "config.json"
-    config_data = {
-        "uuid": node_uuid,
-        "port": node_port,
-        "domain": node_domain,
-        "argo_token": argo_token,
-        "prefer_clean_ip": args.prefer_clean_ip
-    }
-    import json
-    with open(config_path, "w") as f:
-        json.dump(config_data, f, indent=4)
-    print(f"安装完成，配置已写入 {config_path}")
+    # 检测纯净 IP
+    ip = get_public_ip()
+    if ip:
+        if is_clean_ip(ip):
+            print(f"[√] 当前公网 IP {ip} 为纯净 IP")
+        else:
+            print(f"[!] 当前公网 IP {ip} 可能不纯净，建议更换节点")
+    else:
+        print("[!] 无法获取公网 IP")
+
+    # 安装逻辑示例
+    print(f"使用 UUID={NODE_UUID} Token={ARGO_TOKEN}")
+    print("执行安装流程...")
+    # 这里可以放你的实际安装命令，例如 docker、sing-box、xray 等
 
 def uninstall():
-    print(f"卸载 {INSTALL_DIR} …")
-    if INSTALL_DIR.exists():
-        import shutil
-        shutil.rmtree(INSTALL_DIR)
-    print("卸载完成。")
+    print("执行卸载流程...")
+    # 实际卸载命令，例如停止服务、删除文件
+    # os.system("systemctl stop argo.service")
+    # os.system("rm -rf /etc/argo")
+    print("卸载完成")
 
-# ------------------- 执行 -------------------
+# ----------------------------
+# 主流程
+# ----------------------------
 if args.action == "install":
     install()
 elif args.action == "uninstall":
