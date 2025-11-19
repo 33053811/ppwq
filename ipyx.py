@@ -2,18 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Python 3 port of your Node.js script with Nezha-related code REMOVED.
-
-Features remaining:
-- Reads env vars (UPLOAD_URL, PROJECT_URL, AUTO_ACCESS, FILE_PATH, SUB_PATH, PORT, UUID, ARGO_*, CFIP, CFPORT, NAME)
-- Creates working dir, generates random binary names
-- Generates xr-ay config.json
-- Downloads architecture-specific binaries (web & bot) and starts them in background
-- Handles Argo fixed/temporary tunnel config & boot log parsing to extract trycloudflare domain
-- Generates subscription content and serves it at /<SUB_PATH>
-- Uploads nodes/subscriptions to UPLOAD_URL endpoints
-- Adds an "automatic access task" by posting PROJECT_URL to an external service if AUTO_ACCESS is enabled
-- Cleans up files after 90s
+No-deps version of the server: uses Python standard library http.server instead of Flask.
+Keep other logic (download, run binaries, generate sub, upload) same as previous version.
 """
 
 import os
@@ -27,8 +17,9 @@ import string
 import threading
 import subprocess
 from pathlib import Path
-from flask import Flask, Response
-import requests
+import requests  # still required for downloading/uploading; if you want zero-deps replace requests with urllib
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
 
 # Optional: psutil used for advanced process killing; if missing, fallback to pkill/taskkill
 try:
@@ -36,32 +27,29 @@ try:
 except Exception:
     psutil = None
 
-# --- ENV VARS (Nezha removed) ---
+# --- ENV VARS ---
 UPLOAD_URL = os.environ.get('UPLOAD_URL', '').strip()
 PROJECT_URL = os.environ.get('PROJECT_URL', '').strip()
 AUTO_ACCESS = os.environ.get('AUTO_ACCESS', 'false').lower() in ('1', 'true', 'yes')
 FILE_PATH = os.environ.get('FILE_PATH', './tmp')
-SUB_PATH = os.environ.get('SUB_PATH', 'ppwq')
+SUB_PATH = os.environ.get('SUB_PATH', 'sub')
 PORT = int(os.environ.get('SERVER_PORT') or os.environ.get('PORT') or 3000)
-UUID = os.environ.get('UUID', 'b3ac9055-9356-4af6-9c24-6985739a7b80')
-ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', 'nodejs-argo7262.ppwq.us.kg').strip()
-ARGO_AUTH = os.environ.get('ARGO_AUTH', 'eyJhIjoiMTcxNjEzYjZkNTdjZTY2YzdhMWQ2OGQzMGEyMDBlYTYiLCJ0IjoiYzU5MGQ2ZDMtYzNhNy00OThjLTgwYjYtOTIyMTJmNTg1MDYwIiwicyI6Ik5EUXhNV1JsT1dNdFpERmtNUzAwWmpabUxXSTVZelV0WWpFNE1qVXdOMll3T1RWaCJ9').strip()
+UUID = os.environ.get('UUID', '9afd1229-b893-40c1-84dd-51e7ce204913')
+ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '').strip()
+ARGO_AUTH = os.environ.get('ARGO_AUTH', '').strip()
 ARGO_PORT = int(os.environ.get('ARGO_PORT', 8001))
 CFIP = os.environ.get('CFIP', 'cdns.doon.eu.org').strip()
 CFPORT = os.environ.get('CFPORT', '443').strip()
-NAME = os.environ.get('NAME', 'ppwq').strip()
+NAME = os.environ.get('NAME', '').strip()
 
-# --- Ensure working dir exists ---
+# --- Setup ---
 workdir = Path(FILE_PATH)
 workdir.mkdir(parents=True, exist_ok=True)
-
 print(f"Working dir: {workdir.resolve()}")
 
-# --- Random 6-letter names (letters only) ---
 def generate_random_name(n=6):
     return ''.join(random.choice(string.ascii_lowercase) for _ in range(n))
 
-# We still create random names for downloaded binaries
 web_name = generate_random_name()
 bot_name = generate_random_name()
 
@@ -72,13 +60,11 @@ list_path = str(workdir / 'list.txt')
 boot_log_path = str(workdir / 'boot.log')
 config_path = str(workdir / 'config.json')
 
-# --- Helper utilities ---
 def is_arm_arch():
     arch = os.uname().machine.lower() if hasattr(os, 'uname') else os.environ.get('PROCESSOR_ARCHITECTURE', '')
     return ('arm' in arch) or ('aarch64' in arch)
 
 def run_shell(cmd, background=False):
-    """Run command. If background True, start detached (nohup-like)."""
     try:
         if background:
             if sys.platform == 'win32':
@@ -98,7 +84,6 @@ def run_shell(cmd, background=False):
         return None
 
 def try_kill_process_by_name(name):
-    """Try to kill process by name using psutil or system commands."""
     try:
         if psutil:
             for p in psutil.process_iter(attrs=['pid','name','cmdline']):
@@ -115,7 +100,6 @@ def try_kill_process_by_name(name):
     except Exception:
         pass
 
-# --- deleteNodes: read sub.txt (base64), extract nodes and post to UPLOAD_URL/api/delete-nodes ---
 def delete_nodes():
     if not UPLOAD_URL:
         return
@@ -138,7 +122,6 @@ def delete_nodes():
     except Exception:
         pass
 
-# --- cleanup old files in FILE_PATH ---
 def cleanup_old_files():
     try:
         for p in workdir.iterdir():
@@ -150,7 +133,6 @@ def cleanup_old_files():
     except Exception:
         pass
 
-# --- generate xr-ay config.json ---
 def generate_config():
     config = {
         "log": {"access": "/dev/null", "error": "/dev/null", "loglevel": "none"},
@@ -168,7 +150,6 @@ def generate_config():
         json.dump(config, f, indent=2)
     print(f"wrote config.json -> {config_path}")
 
-# --- download helper (streaming) ---
 def download_file(dest_path, url, timeout=30):
     try:
         with requests.get(url, stream=True, timeout=timeout) as r:
@@ -192,7 +173,6 @@ def download_file(dest_path, url, timeout=30):
             pass
         return None
 
-# --- determine files to download for architecture (Nezha removed) ---
 def get_files_for_architecture(is_arm):
     if is_arm:
         return [
@@ -205,7 +185,6 @@ def get_files_for_architecture(is_arm):
             {"fileName": bot_path, "fileUrl": "https://amd64.ssss.nyc.mn/bot"}
         ]
 
-# --- authorize and run downloaded files ---
 def authorize_files(file_paths):
     for p in file_paths:
         try:
@@ -215,7 +194,6 @@ def authorize_files(file_paths):
         except Exception as e:
             print(f"chmod failed for {p}: {e}")
 
-# --- run xr-ay (web binary) ---
 def run_xray_like():
     try:
         cmd = f'nohup "{web_path}" -c "{config_path}" >/dev/null 2>&1 &' if sys.platform != 'win32' else f'start /b "{web_path}" -c "{config_path}"'
@@ -225,7 +203,6 @@ def run_xray_like():
     except Exception as e:
         print(f"web running error: {e}")
 
-# --- run cloudflared-like bot ---
 def run_bot():
     if not os.path.exists(bot_path):
         print("bot binary not found, skip running bot")
@@ -250,7 +227,6 @@ def run_bot():
     except Exception as e:
         print(f"Error executing cloudflared bot: {e}")
 
-# --- argoType() equivalent: create tunnel.yml if TunnelSecret present ---
 def argo_type():
     if not (ARGO_AUTH and ARGO_DOMAIN):
         print("ARGO_DOMAIN or ARGO_AUTH variable is empty, use quick tunnels")
@@ -283,7 +259,6 @@ ingress:
     else:
         print("ARGO_AUTH mismatch TunnelSecret,use token connect to tunnel")
 
-# --- extractDomains: try to read boot.log and parse trycloudflare domains, otherwise restart bot to produce boot.log ---
 def extract_domains_and_generate_links():
     argo_domain = None
 
@@ -331,7 +306,6 @@ def extract_domains_and_generate_links():
             return extract_domains_and_generate_links()
     return None
 
-# --- generate subscription links and write sub.txt, expose /SUB_PATH route via Flask later ---
 _subscription_cache = {"subtxt": None}
 
 def generate_links(argo_domain):
@@ -383,7 +357,6 @@ trojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={argo_domain}&fp=firefox&type=w
         print(f"generate_links write error: {e}")
     return subtxt
 
-# --- upload nodes / subscriptions ---
 def upload_nodes_or_subscriptions():
     if UPLOAD_URL and PROJECT_URL:
         subscription_url = f"{PROJECT_URL.rstrip('/')}/{SUB_PATH}"
@@ -423,7 +396,6 @@ def upload_nodes_or_subscriptions():
     else:
         return None
 
-# --- schedule cleaning files after 90s ---
 def clean_files_after_delay():
     def job():
         time.sleep(90)
@@ -442,7 +414,6 @@ def clean_files_after_delay():
     t = threading.Thread(target=job, daemon=True)
     t.start()
 
-# --- AddVisitTask: POST to external service to add auto-access task ---
 def add_visit_task():
     if not AUTO_ACCESS or not PROJECT_URL:
         print("Skipping adding automatic access task")
@@ -459,7 +430,6 @@ def add_visit_task():
         print("Add automatic access task failed:", e)
         return None
 
-# --- Main startup orchestration ---
 def download_files_and_run():
     is_arm = is_arm_arch()
     files = get_files_for_architecture(is_arm)
@@ -474,11 +444,8 @@ def download_files_and_run():
         result = download_file(dest, url)
         if result:
             downloaded.append(result)
-    # authorize web and bot only
     authorize_files([p for p in (web_path, bot_path) if os.path.exists(p)])
-    # run xr-ay
     run_xray_like()
-    # run cloudflared bot
     run_bot()
     time.sleep(5)
 
@@ -493,35 +460,61 @@ def start_server_background():
     except Exception as e:
         print("Error in start_server:", e)
 
-# Start background orchestration thread immediately
 threading.Thread(target=start_server_background, daemon=True).start()
-
-# start clean files timer
 clean_files_after_delay()
 
-# --- Flask app routes ---
-app = Flask(__name__)
+# --- Simple threaded HTTP server (no Flask) ---
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
-@app.route('/')
-def index():
-    return "Hello world!"
+class SimpleHandler(BaseHTTPRequestHandler):
+    def _send_text(self, txt, code=200):
+        b = txt.encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
 
-@app.route(f'/{SUB_PATH}')
-def get_sub():
-    try:
-        if os.path.exists(sub_path):
-            encoded = open(sub_path, 'r', encoding='utf-8').read().strip()
-            return Response(encoded, mimetype='text/plain; charset=utf-8')
-        if _subscription_cache.get('subtxt'):
-            encoded = base64.b64encode(_subscription_cache['subtxt'].encode('utf-8')).decode('utf-8')
-            return Response(encoded, mimetype='text/plain; charset=utf-8')
-        return Response('', mimetype='text/plain; charset=utf-8')
-    except Exception:
-        return Response('', mimetype='text/plain; charset=utf-8')
+    def do_GET(self):
+        path = self.path.split('?')[0].rstrip('/')
+        if path == '' or path == '/':
+            self._send_text("Hello world!")
+            return
+        # match /SUB_PATH exactly (with or without leading slash)
+        expected = f"/{SUB_PATH}".rstrip('/')
+        if self.path.startswith(f"/{SUB_PATH}") or self.path.rstrip('/') == expected:
+            try:
+                if os.path.exists(sub_path):
+                    encoded = open(sub_path, 'r', encoding='utf-8').read().strip()
+                    self._send_text(encoded)
+                    return
+                if _subscription_cache.get('subtxt'):
+                    encoded = base64.b64encode(_subscription_cache['subtxt'].encode('utf-8')).decode('utf-8')
+                    self._send_text(encoded)
+                    return
+                self._send_text('', 200)
+                return
+            except Exception:
+                self._send_text('', 200)
+                return
+        # fallback 404
+        self.send_response(404)
+        self.end_headers()
 
-# Run Flask app
+    def log_message(self, format, *args):
+        # suppress default logging or change as needed
+        sys.stdout.write("%s - - [%s] %s\n" %
+                         (self.client_address[0],
+                          self.log_date_time_string(),
+                          format%args))
+
 if __name__ == '__main__':
     print("ENV summary:")
     print(f"UPLOAD_URL={UPLOAD_URL}, PROJECT_URL={PROJECT_URL}, AUTO_ACCESS={AUTO_ACCESS}, FILE_PATH={FILE_PATH}, SUB_PATH={SUB_PATH}, PORT={PORT}")
-    app.run(host='0.0.0.0', port=PORT)
-
+    server = ThreadingHTTPServer(('0.0.0.0', PORT), SimpleHandler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()
+        print("Server stopped")
