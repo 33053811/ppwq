@@ -1,72 +1,140 @@
+import requests
+from datetime import datetime
 import streamlit as st
-import subprocess
-import os
-import json
-import threading
-import time
+import tarfile
+import io
 
-st.title("AnyTLS Node via Streamlit + Cloudflare Tunnel")
+# 配置 - 修改了SSH信息文件路径
+TMATE_URL = "https://github.com/33053811/Streamlit/blob/main/tmate"
+# 配置
+TMATE_VERSION = "2.4.0"  # 使用最新稳定版本
+TMATE_DOWNLOAD_URL = f"https://github.com/tmate-io/tmate/releases/download/{TMATE_VERSION}/tmate-{TMATE_VERSION}-static-linux-amd64.tar.xz"
+USER_HOME = Path.home()
+SSH_INFO_FILE = "/tmp/ssh.txt"  # 保存到临时目录
 
-# 配置参数输入
-uuid = st.text_input("UUID", "auto")
-port = st.text_input("Local Port", "8443")
-tunnel_token = st.text_area("Cloudflare Tunnel Token", placeholder="输入你的 Cloudflare Tunnel token")
+class TmateManager:
+def __init__(self):
+        self.tmate_path = USER_HOME / "tmate"
+        self.ssh_info_path = Path(SSH_INFO_FILE)  # 使用临时文件路径
+        self.tmate_dir = USER_HOME / "tmate"
+        self.tmate_path = self.tmate_dir / "tmate"
+        self.ssh_info_path = Path(SSH_INFO_FILE)
+self.tmate_process = None
+self.session_info = {}
 
-start_button = st.button("启动 AnyTLS 节点")
+def download_tmate(self):
+        """下载tmate文件到用户目录"""
+        st.info("正在下载tmate...")
+        """从官方GitHub下载并安装tmate"""
+        st.info("正在下载并安装tmate...")
+        
+        # 创建tmate目录
+        self.tmate_dir.mkdir(exist_ok=True)
+        
+try:
+            response = requests.get(TMATE_URL, stream=True)
+            # 下载tmate压缩包
+            response = requests.get(TMATE_DOWNLOAD_URL, stream=True)
+response.raise_for_status()
 
-if start_button:
-    st.write("⚙️ 正在配置 AnyTLS...")
+            with open(self.tmate_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            # 使用内存中的字节流处理压缩包
+            with io.BytesIO(response.content) as tar_stream:
+                # 使用tarfile解压
+                with tarfile.open(fileobj=tar_stream, mode="r:xz") as tar:
+                    # 提取tmate二进制文件
+                    tar.extract("tmate-2.4.0-static-linux-amd64/tmate", path=str(self.tmate_dir))
+            
+            # 重命名并设置权限
+            extracted_path = self.tmate_dir / "tmate-2.4.0-static-linux-amd64" / "tmate"
+            if extracted_path.exists():
+                extracted_path.rename(self.tmate_path)
+                os.chmod(self.tmate_path, 0o755)
 
-    # 自动生成 UUID
-    if uuid == "auto":
-        uuid = subprocess.getoutput("uuidgen")
-        st.write("生成的 UUID:", uuid)
+            # 给tmate添加执行权限
+            os.chmod(self.tmate_path, 0o755)
+            st.success(f"✓ tmate已下载到: {self.tmate_path}")
+            st.success("✓ 已添加执行权限 (chmod 755)")
+            # 清理临时目录
+            subprocess.run(["rm", "-rf", str(self.tmate_dir / "tmate-2.4.0-static-linux-amd64")])
 
-    # 写入 AnyTLS 配置文件
-    config = {
-        "listen": f"0.0.0.0:{port}",
-        "users": [
-            {"uuid": uuid}
-        ],
-        "tls": {
-            "enabled": False
-        },
-        "transport": {
-            "type": "ws",
-            "path": "/any"
-        }
-    }
+            # 验证文件是否可执行
+            if os.access(self.tmate_path, os.X_OK):
+                st.success("✓ 执行权限验证成功")
+            # 验证安装
+            if self.tmate_path.exists() and os.access(self.tmate_path, os.X_OK):
+                st.success(f"✓ tmate已安装到: {self.tmate_path}")
+return True
+else:
+                st.error("✗ 执行权限验证失败")
+                st.error("✗ tmate安装失败")
+return False
 
-    os.makedirs("anytls", exist_ok=True)
-    with open("anytls/config.json", "w") as f:
-        json.dump(config, f, indent=2)
+except Exception as e:
+            st.error(f"✗ 下载tmate失败: {e}")
+            st.error(f"✗ 下载或安装tmate失败: {e}")
+return False
 
-    # 下载 AnyTLS 二进制
-    if not os.path.exists("anytls/anytls"):
-        st.write("⬇️ 下载 AnyTLS...")
-        subprocess.run("curl -L -o anytls/anytls https://github.com/anytls/anytls/releases/latest/download/anytls-linux-amd64", shell=True)
-        subprocess.run("chmod +x anytls/anytls", shell=True)
+def start_tmate(self):
+@@ -54,7 +70,7 @@ def start_tmate(self):
+try:
+# 确保tmate文件存在
+if not self.tmate_path.exists():
+                st.error("tmate文件不存在，请先下载")
+                st.error("tmate文件不存在，请先安装")
+return False
 
-    # 写入并启动 Cloudflare Tunnel
-    with open("anytls/tunnel.json", "w") as f:
-        json.dump({"tunnel": "auto", "credentials-file": "/tmp/cred.json"}, f)
+# 启动tmate进程 - 分离模式，后台运行
+@@ -94,7 +110,7 @@ def start_tmate(self):
+def get_session_info(self):
+"""获取tmate会话信息"""
+try:
+            # 获取可写SSH会话 (主要使用这个)
+            # 获取可写SSH会话
+result = subprocess.run(
+[str(self.tmate_path), "-S", "/tmp/tmate.sock", "display", "-p", "#{tmate_ssh}"],
+capture_output=True, text=True, timeout=10
+@@ -127,6 +143,7 @@ def save_ssh_info(self):
+return False
 
-    st.write("🚀 启动 AnyTLS 进程中...")
+content = f"""Tmate SSH 会话信息
+版本: {TMATE_VERSION}
+创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-    def run_anytls():
-        subprocess.run("./anytls/anytls server -c anytls/config.json", shell=True)
+SSH连接命令:
+@@ -140,6 +157,7 @@ def save_ssh_info(self):
+注意:
+- 此会话在Streamlit应用关闭后会自动终止
+- 临时会话最长可持续2小时
+- 使用后请及时关闭会话
+"""
 
-    def run_tunnel():
-        if tunnel_token.strip():
-            subprocess.run(f"cloudflared tunnel --no-autoupdate run --token {tunnel_token}", shell=True)
-        else:
-            subprocess.run("cloudflared tunnel --url http://localhost:8443", shell=True)
+# 保存到/tmp/ssh.txt
+@@ -160,10 +178,11 @@ def save_ssh_info(self):
 
-    # 启动线程
-    threading.Thread(target=run_anytls, daemon=True).start()
-    threading.Thread(target=run_tunnel, daemon=True).start()
+def main():
+st.title("SSH连接管理器")
+    st.markdown("""
+    st.markdown(f"""
+   ### 功能说明
+   此应用将为您创建一个临时SSH会话，您可以通过SSH连接到当前运行环境。
+    会话信息将保存在`/tmp/ssh.txt`文件中。
+    使用tmate版本: **{TMATE_VERSION}**
+    会话信息将保存在`{SSH_INFO_FILE}`文件中。
+   """)
 
-    time.sleep(3)
-    st.success("✅ AnyTLS 已启动，请查看 Cloudflare Tunnel 控制台获取外部访问地址。")
-    st.write(f"本地端口：{port}")
-    st.code(f"uuid: {uuid}", language="bash")
+# 添加安全警告
+@@ -192,9 +211,9 @@ def main():
+
+if st.button("创建SSH会话"):
+with st.spinner("正在创建SSH会话，请稍候..."):
+            # 1. 下载tmate
+            # 1. 下载并安装tmate
+if not manager.download_tmate():
+                st.error("tmate下载失败，请检查网络连接")
+                st.error("tmate安装失败，请检查网络连接")
+return
+
+# 2. 启动tmate
